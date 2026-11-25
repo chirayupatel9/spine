@@ -1,0 +1,11 @@
+services:
+  spine:
+    build: .
+    container_name: spine
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ${MUSIC_PATH:-./music}:/music:ro   # your music folder (read-only)
+      - ./data:/data                       # database + cached artwork

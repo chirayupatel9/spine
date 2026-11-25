@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#17171b">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Spine</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">SPINE</div>
+    <nav class="seg" id="sourceSeg">
+      <button data-source="all" class="on">All</button>
+      <button data-source="spotify">Spotify</button>
+      <button data-source="local">Local</button>
+    </nav>
+    <input id="search" type="search" placeholder="Search" autocomplete="off">
+    <select id="sort" aria-label="Sort">
+      <option value="artist">Artist</option>
+      <option value="added">Recently added</option>
+      <option value="title">Title</option>
+      <option value="year">Year</option>
+      <option value="color">Colour</option>
+    </select>
+    <button class="icon" id="wallBtn" title="Wall mode (fullscreen)">⤢</button>
+    <button class="icon" id="settingsBtn" title="Settings">⚙</button>
+  </header>
+
+  <main id="wall">
+    <div id="shelves"></div>
+    <div id="empty" hidden>
+      <h2>Your shelf is empty</h2>
+      <p>Connect Spotify or put music in your library folder, then open Settings.</p>
+      <button class="primary" onclick="openSettings()">Open settings</button>
+    </div>
+    <div id="scanToast" hidden></div>
+  </main>
+
+  <!-- album pulled off the shelf -->
+  <div id="albumSheet" class="sheet" hidden>
+    <div class="sheet-bg" data-close></div>
+    <div class="album-card">
+      <button class="close icon" data-close>✕</button>
+      <div class="cover-wrap"><img id="aCover" alt=""></div>
+      <div class="album-info">
+        <div class="src-badge" id="aSource"></div>
+        <h2 id="aTitle"></h2>
+        <div class="artist" id="aArtist"></div>
+        <div class="actions">
+          <button class="primary" id="aPlay">▶ Play</button>
+          <button id="aShuffle">Shuffle</button>
+          <button id="aMore" class="icon" title="More">⋯</button>
+        </div>
+        <div id="aMenu" class="menu" hidden>
+          <button id="aFixArt">Fix artwork</button>
+          <button id="aHide">Hide from shelf</button>
+        </div>
+        <form id="artForm" hidden>
+          <div class="hint">Search covers online with corrected names, or upload an image.</div>
+          <input name="artist" placeholder="Artist">
+          <input name="album" placeholder="Album (leave empty to search by song)">
+          <input name="song" placeholder="Song name">
+          <div class="row">
+            <button class="primary" type="submit">Search</button>
+            <label class="filebtn">Upload<input type="file" accept="image/*" id="artFile" hidden></label>
+          </div>
+          <div class="hint" id="artMsg"></div>
+        </form>
+        <ol id="aTracks"></ol>
+      </div>
+    </div>
+  </div>
+
+  <!-- settings -->
+  <div id="settingsSheet" class="sheet" hidden>
+    <div class="sheet-bg" data-close></div>
+    <div class="panel">
+      <button class="close icon" data-close>✕</button>
+      <h2>Settings</h2>
+
+      <section>
+        <h3>Spotify</h3>
+        <div id="spStatus" class="hint"></div>
+        <div class="row" id="spButtons"></div>
+        <div id="spAdd" class="row" hidden>
+          <input id="spLink" placeholder="Add album by Spotify link">
+          <button id="spAddBtn">Add</button>
+        </div>
+        <label class="check" id="sdkRow" hidden><input type="checkbox" id="sdkToggle"> Use this screen as a Spotify speaker (desktop browsers)</label>
+      </section>
+
+      <section>
+        <h3>Local library</h3>
+        <div id="libStatus" class="hint"></div>
+        <div class="row">
+          <button id="rescanBtn">Rescan folder</button>
+          <button id="refetchBtn">Re-find all artwork</button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Shelf</h3>
+        <label class="check"><input type="checkbox" id="showHidden"> Show hidden albums</label>
+        <label class="range">Shelf height <input type="range" id="shelfH" min="180" max="520" step="10"></label>
+        <label class="check"><input type="checkbox" id="spineNames" checked> Show text on spines</label>
+      </section>
+    </div>
+  </div>
+
+  <!-- device picker -->
+  <div id="deviceSheet" class="sheet" hidden>
+    <div class="sheet-bg" data-close></div>
+    <div class="panel small">
+      <button class="close icon" data-close>✕</button>
+      <h2>Play on</h2>
+      <div id="deviceList"></div>
+      <div class="hint">Don't see your device? Open Spotify on it once, then refresh.</div>
+      <button id="devRefresh">Refresh</button>
+    </div>
+  </div>
+
+  <footer id="player" hidden>
+    <img id="pCover" alt="">
+    <div class="p-meta">
+      <div id="pTitle"></div>
+      <div id="pArtist"></div>
+      <div class="p-progress"><div id="pBar"></div></div>
+    </div>
+    <div class="p-ctrl">
+      <button class="icon" id="pPrev">⏮</button>
+      <button class="icon big" id="pToggle">⏸</button>
+      <button class="icon" id="pNext">⏭</button>
+    </div>
+    <button class="device" id="pDevice" title="Choose speaker">🔈 <span id="pDeviceName"></span></button>
+  </footer>
+
+  <audio id="audio" preload="auto"></audio>
+  <div id="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>
