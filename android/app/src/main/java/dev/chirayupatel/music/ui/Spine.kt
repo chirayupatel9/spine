@@ -160,10 +160,12 @@ fun Spine(
                     Modifier.fillMaxSize().padding(start = cross * .06f, end = cross * .13f).graphicsLayer { alpha = labelAlpha },
                     contentAlignment = Alignment.CenterStart,
                 ) { labelRow() }
-                // the label's mark: a thin rule (a box at the end of a row reads as a checkbox)
+                // the label's mark: a thin rule (a box at the end of a row reads as a checkbox); a dot for a playlist
                 Box(
-                    Modifier.align(Alignment.CenterEnd).padding(end = cross * .045f).width(2.dp).fillMaxHeight(.44f)
-                        .graphicsLayer { alpha = labelAlpha * .3f }.background(ink, RoundedCornerShape(1.dp)),
+                    Modifier.align(Alignment.CenterEnd).padding(end = cross * .045f)
+                        .then(if (a.kind == "playlist") Modifier.size(6.dp) else Modifier.width(2.dp).fillMaxHeight(.44f))
+                        .graphicsLayer { alpha = labelAlpha * (if (a.kind == "playlist") .45f else .3f) }
+                        .background(ink, if (a.kind == "playlist") CircleShape else RoundedCornerShape(1.dp)),
                 )
             } else {
                 Box(
@@ -172,8 +174,10 @@ fun Spine(
                 ) { Box(Modifier.verticalText()) { labelRow() } }
                 // the label's mark at the foot: a thin rule, since a box there reads as a checkbox
                 if (thickness >= 13.dp) Box(
-                    Modifier.align(Alignment.BottomCenter).padding(bottom = cross * .045f).fillMaxWidth(.44f).height(2.dp)
-                        .graphicsLayer { alpha = labelAlpha * .3f }.background(ink, RoundedCornerShape(1.dp)),
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = cross * .045f)
+                        .then(if (a.kind == "playlist") Modifier.size(6.dp) else Modifier.fillMaxWidth(.44f).height(2.dp))
+                        .graphicsLayer { alpha = labelAlpha * (if (a.kind == "playlist") .45f else .3f) }
+                        .background(ink, if (a.kind == "playlist") CircleShape else RoundedCornerShape(1.dp)),
                 )
             }
         }

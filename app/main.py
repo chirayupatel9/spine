@@ -82,6 +82,7 @@ OPEN_PATHS = frozenset({
     "/login", "/healthz", "/manifest.webmanifest", "/.well-known/assetlinks.json",
     "/icon.svg", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png",
     "/auth/google/login", "/auth/google/callback", "/auth/spotify/login", "/auth/spotify/callback", "/auth/app/exchange",
+    "/auth/spotify/start",
 })
 # Caching. Cloudflare (or any shared cache) must never keep anything behind sign-in, nor a sign-in
 # redirect: a cached redirect for /app.js would break the app for everyone. Signed-in responses are
@@ -267,13 +268,14 @@ def logout(request: Request):
 
 # ---------------------------------------------------------------- Google and Spotify sign-in
 
-def _start_flow(provider: str, *, verifier: str | None = None, user_id: int | None = None, app_challenge: str | None = None) -> str:
+def _start_flow(provider: str, *, verifier: str | None = None, user_id: int | None = None, app_challenge: str | None = None,
+                app: bool = False) -> str:
     state = secrets.token_urlsafe(24)
     now = time.time()
     with db.tx() as c:
         c.execute("DELETE FROM oauth_flows WHERE expires_at < ?", (now,))
-        c.execute("INSERT INTO oauth_flows(state, provider, verifier, user_id, app_challenge, expires_at) VALUES(?,?,?,?,?,?)",
-                  (state, provider, verifier, user_id, app_challenge, now + 600))
+        c.execute("INSERT INTO oauth_flows(state, provider, verifier, user_id, app_challenge, app, expires_at) VALUES(?,?,?,?,?,?,?)",
+                  (state, provider, verifier, user_id, app_challenge, 1 if app else 0, now + 600))
     return state
 
 
@@ -303,7 +305,7 @@ def _app_challenge(app_: str | None, challenge: str | None) -> str | None:
 
 
 def _flow_error(flow: dict | None, message: str) -> RedirectResponse:
-    if flow and flow.get("app_challenge"):
+    if flow and (flow.get("app_challenge") or flow.get("app")):
         r = RedirectResponse(f"{APP_SCHEME}://auth?error={quote(message)}", status_code=303)
     elif flow and flow.get("user_id"):
         r = RedirectResponse(f"/?spotify_error={quote(message)}", status_code=303)
@@ -630,7 +632,7 @@ def spotify_callback(request: Request, code: str | None = None, state: str | Non
             return _flow_error(flow, str(e))
         spotify.store_tokens(flow["user_id"], tokens)
         spotify.start_sync(flow["user_id"])
-        r = RedirectResponse("/?spotify=connected", status_code=303)
+        r = RedirectResponse(f"{APP_SCHEME}://auth?connected=spotify" if flow.get("app") else "/?spotify=connected", status_code=303)
         r.delete_cookie(FLOW_COOKIE)
         return r
     for row in db.query("SELECT a.user_id FROM spotify_auth a JOIN users u ON u.id=a.user_id WHERE u.spotify_id IS NULL"):
@@ -642,6 +644,24 @@ def spotify_callback(request: Request, code: str | None = None, state: str | Non
     spotify.store_tokens(u["id"], tokens)
     spotify.start_sync(u["id"])
     return _finish_sign_in(u["id"], flow, "/?spotify=connected")
+
+
+@app.post("/api/spotify/connect-link")
+def spotify_connect_link(request: Request):
+    """For the Android app: a one-time address that connects Spotify to this account in a browser
+    tab (which doesn't share the app's sign-in), then comes back to the app."""
+    if not spotify.configured():
+        raise HTTPException(400, "Spotify isn't set up on this server")
+    state = _start_flow("spotify", user_id=_user(request)["id"], app=True)
+    return {"url": f"{PUBLIC_URL}/auth/spotify/start?flow={state}"}
+
+
+@app.get("/auth/spotify/start", include_in_schema=False)
+def spotify_start(flow: str = ""):
+    row = db.one("SELECT state FROM oauth_flows WHERE state=? AND provider='spotify' AND app=1 AND expires_at > ?", (flow, time.time()))
+    if not row:
+        return RedirectResponse(f"{APP_SCHEME}://auth?error={quote('That link expired. Try again.')}", status_code=303)
+    return _flow_redirect(spotify.authorize_url(row["state"]), row["state"])
 
 
 @app.post("/api/spotify/disconnect")

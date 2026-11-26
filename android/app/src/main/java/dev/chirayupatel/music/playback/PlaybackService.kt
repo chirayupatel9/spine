@@ -66,7 +66,7 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         session = MediaSession.Builder(this, player)
-            .setBitmapLoader(CacheBitmapLoader(SignedInBitmapLoader(client)))
+            .setBitmapLoader(CacheBitmapLoader(SignedInBitmapLoader(client, contentResolver)))
             .setSessionActivity(open)
             .build()
     }
@@ -94,9 +94,10 @@ class PlaybackService : MediaSessionService() {
     }
 }
 
-/** Loads cover art for the notification through the signed-in client (covers need sign-in). */
+/** Loads cover art for the notification: from the server through the signed-in client (covers
+ *  need sign-in), or from this phone for its own music. */
 @OptIn(UnstableApi::class)
-private class SignedInBitmapLoader(private val client: OkHttpClient) : BitmapLoader {
+private class SignedInBitmapLoader(private val client: OkHttpClient, private val resolver: android.content.ContentResolver) : BitmapLoader {
     private val executor: ListeningExecutorService = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
 
     override fun supportsMimeType(mimeType: String): Boolean = mimeType.startsWith("image/")
@@ -106,6 +107,10 @@ private class SignedInBitmapLoader(private val client: OkHttpClient) : BitmapLoa
 
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> =
         executor.submit(Callable {
+            when (uri.scheme) {
+                "file" -> return@Callable BitmapFactory.decodeFile(uri.path) ?: throw IOException("Not an image")
+                "content" -> return@Callable resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: throw IOException("Not an image")
+            }
             client.newCall(Request.Builder().url(uri.toString()).build()).execute().use { r ->
                 if (!r.isSuccessful) throw IOException("Cover: HTTP ${r.code}")
                 val bytes = r.body?.bytes() ?: throw IOException("Cover: empty")

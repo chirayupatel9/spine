@@ -1,5 +1,6 @@
 package dev.chirayupatel.music.ui
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.WindowManager
@@ -30,6 +31,7 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
+        handle(intent)
         setContent {
             AlbumViewerTheme {
                 LaunchedEffect(vm.wallMode) { applyWallMode(vm.wallMode) }
@@ -41,6 +43,20 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handle(intent)
+    }
+
+    /** A sign-in (or Spotify connection) coming back from the browser. */
+    private fun handle(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme == packageName && data.host == "auth") {
+            vm.completeSignIn(data)
+            setIntent(Intent(this, MainActivity::class.java))   // not again on rotation
         }
     }
 

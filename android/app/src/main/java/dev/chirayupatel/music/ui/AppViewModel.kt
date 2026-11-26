@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -22,8 +23,10 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import dev.chirayupatel.music.App
+import dev.chirayupatel.music.device.PhoneMusic
 import dev.chirayupatel.music.net.Album
 import dev.chirayupatel.music.net.AlbumDetail
+import dev.chirayupatel.music.net.Me
 import dev.chirayupatel.music.net.NotSignedIn
 import dev.chirayupatel.music.net.SpotifyState
 import dev.chirayupatel.music.net.Status
@@ -35,6 +38,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.text.Collator
 import kotlin.math.max
 import kotlin.math.min
@@ -55,9 +60,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** null while starting, then whether this device is signed in. */
     var signedIn by mutableStateOf<Boolean?>(null); private set
-    var albums by mutableStateOf<List<Album>>(emptyList()); private set
+    var me by mutableStateOf<Me?>(null); private set
     var loaded by mutableStateOf(false); private set
     var status by mutableStateOf<Status?>(null); private set
+    var authBusy by mutableStateOf(false); private set
+    var authError by mutableStateOf<String?>(null)
+
+    // The shelf: this person's albums from the server, and (if they've turned it on) the music on this phone.
+    private var serverAlbums by mutableStateOf<List<Album>>(emptyList())
+    private val phone = PhoneMusic(app)
+    var phoneMusicOn by mutableStateOf(prefs.getBoolean("phoneMusic", false)); private set
+    var phoneAlbums by mutableStateOf<List<Album>>(emptyList()); private set
+    private var phoneDetails: Map<String, AlbumDetail> = emptyMap()
+    private var orderIds by mutableStateOf<List<String>>(emptyList())   // the manual order, server and phone albums alike
+    val albums: List<Album> by derivedStateOf {
+        if (phoneAlbums.isEmpty()) serverAlbums else {
+            val pos = orderIds.withIndex().associate { (i, id) -> id to i }
+            serverAlbums + phoneAlbums.map { it.copy(pos = pos[it.id]) }
+        }
+    }
+    val phoneAllowed: Boolean get() = phone.allowed()
 
     var source by mutableStateOf(prefs.getString("source", "all") ?: "all")
         private set
@@ -91,11 +113,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun artUrl(path: String?): String? = path?.let { api.url(it) }
 
     val hasDemo by derivedStateOf { albums.any { it.source == "demo" } }
+    val hasPlaylists by derivedStateOf { albums.any { it.kind == "playlist" } }
 
     val visible: List<Album> by derivedStateOf {
         val q = query.trim().lowercase()
-        val src = if (source == "demo" && !hasDemo) "all" else source
-        arrange(albums.filter { (src == "all" || it.source == src) && (q.isEmpty() || it.title.lowercase().contains(q) || it.artist.lowercase().contains(q)) }, sort)
+        val src = if ((source == "demo" && !hasDemo) || (source == "playlist" && !hasPlaylists)) "all" else source
+        fun inSource(a: Album) = when (src) {
+            "all" -> true
+            "playlist" -> a.kind == "playlist"
+            "local" -> a.source == "local" || a.source == "device"
+            else -> a.source == src
+        }
+        arrange(albums.filter { inSource(it) && (q.isEmpty() || it.title.lowercase().contains(q) || it.artist.lowercase().contains(q)) }, sort)
     }
 
     /** The A-Z (or decade) jumps: each key with the index of its first album. */
@@ -116,6 +145,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (ok) showCached()
         signedIn = ok
         if (ok) refresh()
+        if (phoneMusicOn) scanPhone()
         connectPlayer()
         viewModelScope.launch {   // keep the position moving while something plays
             var tick = 0
@@ -150,23 +180,100 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         controller?.run { stop(); clearMediaItems() }
         api.signOut()
         withContext(Dispatchers.IO) { cacheFile.delete() }
-        albums = emptyList(); loaded = false; openId = null; sheet = null; showSettings = false; showPlayer = false
+        serverAlbums = emptyList(); orderIds = emptyList(); me = null
+        loaded = false; openId = null; sheet = null; showSettings = false; showPlayer = false
         nowAlbumId = null; nowTitle = ""; spotifyMode = false; upNext = emptyList()
         signedIn = false
     }
 
     private fun showCached() {   // the last shelf this device saw: on screen instantly
-        runCatching { if (cacheFile.exists()) { albums = api.parseAlbums(cacheFile.readText()); loaded = true } }
+        runCatching { if (cacheFile.exists()) { serverAlbums = api.parseAlbums(cacheFile.readText()); loaded = true } }
+    }
+
+    /* ------------------------------------------------ signing in with Google or Spotify
+
+       The sign-in happens in a browser tab, which then hands back to the app a one-time code
+       (dev.chirayupatel.music://auth?code=...). Only this app can use it: it also needs the secret
+       whose hash went out at the start, kept here meanwhile. */
+
+    /** The address to open in the browser for a Google or Spotify sign-in, or null (see authError). */
+    fun beginSignIn(provider: String, serverInput: String): Uri? {
+        val base = api.normalize(serverInput) ?: run { authError = "That isn't a web address"; return null }
+        val verifier = Base64.encodeToString(ByteArray(48).also { SecureRandom().nextBytes(it) }, B64)
+        prefs.edit().putString("auth_verifier", verifier).putString("auth_server", base).apply()
+        val challenge = Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()), B64)
+        authError = null
+        val path = if (provider == "google") "/auth/google/login?app=1" else "/auth/spotify/login?mode=login&app=1"
+        return Uri.parse("$base$path&challenge=$challenge")
+    }
+
+    /** The browser came back: a code to trade for a session, Spotify connected, or what went wrong. */
+    fun completeSignIn(uri: Uri) {
+        uri.getQueryParameter("error")?.let { if (signedIn == true) message = it else authError = it; return }
+        if (uri.getQueryParameter("connected") == "spotify") { message = "Spotify connected — bringing in your albums and playlists"; followSync(); return }
+        val code = uri.getQueryParameter("code") ?: return
+        val verifier = prefs.getString("auth_verifier", null) ?: run { authError = "Start the sign-in again"; return }
+        val base = prefs.getString("auth_server", null) ?: api.server
+        prefs.edit().remove("auth_verifier").apply()
+        authBusy = true
+        viewModelScope.launch {
+            try {
+                api.exchangeAppCode(base, code, verifier)
+                signedIn = true; authError = null
+                refresh()
+            } catch (e: IOException) {
+                authError = e.message ?: "That sign-in didn't go through"
+            } finally { authBusy = false }
+        }
+    }
+
+    /** Connect Spotify to this account: the server hands out a one-time address for the browser. */
+    fun connectSpotify(open: (Uri) -> Unit) = viewModelScope.launch {
+        try { open(Uri.parse(api.spotifyConnectLink())) } catch (e: IOException) { handle(e) }
+    }
+
+    /** Refresh the shelf while Spotify's albums and playlists come in. */
+    private fun followSync() = viewModelScope.launch {
+        repeat(40) {
+            delay(1500)
+            val st = runCatching { api.status() }.getOrNull() ?: return@repeat
+            status = st
+            if (it % 2 == 1 || !st.spotify.syncing) refresh()
+            if (!st.spotify.syncing && it > 0) return@launch
+        }
+    }
+
+    /* ------------------------------------------------ music on this phone */
+
+    fun enablePhoneMusic() {
+        phoneMusicOn = true
+        prefs.edit().putBoolean("phoneMusic", true).apply()
+        scanPhone()
+    }
+
+    fun disablePhoneMusic() {
+        phoneMusicOn = false
+        prefs.edit().putBoolean("phoneMusic", false).apply()
+        if (nowAlbumId?.startsWith("dev_") == true) { controller?.run { stop(); clearMediaItems() }; nowAlbumId = null; nowTitle = ""; isPlaying = false }
+        phoneAlbums = emptyList(); phoneDetails = emptyMap()
+    }
+
+    private fun scanPhone() = viewModelScope.launch {
+        val lib = runCatching { phone.scan() }.getOrNull() ?: return@launch
+        phoneDetails = lib.details
+        phoneAlbums = lib.albums
     }
 
     fun refresh() = viewModelScope.launch {
         try {
             val text = api.albumsJson()
             val list = withContext(Dispatchers.Default) { api.parseAlbums(text) }
-            if (list != albums) albums = list
+            if (list != serverAlbums) serverAlbums = list
             loaded = true
             withContext(Dispatchers.IO) { cacheFile.writeText(text) }
             status = runCatching { api.status() }.getOrNull()
+            runCatching { api.me() }.getOrNull()?.let { me = it }
+            runCatching { api.order() }.getOrNull()?.let { if (it != orderIds) orderIds = it }
             // Pick up whatever Spotify is already playing, unless this phone is playing something.
             if (status?.spotify?.connected == true && !spotifyMode && (controller?.mediaItemCount ?: 0) == 0) {
                 val s = runCatching { api.spotifyState() }.getOrNull()
@@ -209,9 +316,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         var k = 0
         val ids = arrange(albums, Sort.MANUAL).map { if (it.id in shownSet && k < shown.size) shown[k++] else it.id }
         val pos = ids.withIndex().associate { (i, id) -> id to i }
-        albums = albums.map { it.copy(pos = pos[it.id]) }
+        serverAlbums = serverAlbums.map { it.copy(pos = pos[it.id]) }
+        orderIds = ids
         if (sort != Sort.MANUAL) { sort = Sort.MANUAL; prefs.edit().putString("sort", Sort.MANUAL.name).apply() }
-        val snapshot = albums
+        val snapshot = serverAlbums
         viewModelScope.launch {
             try {
                 api.saveOrder(ids)
@@ -234,7 +342,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         try { sheet = detail(id) } catch (e: IOException) { handle(e) }
     }
 
-    private suspend fun detail(id: String): AlbumDetail = details[id] ?: api.album(id).also { details[id] = it }
+    private suspend fun detail(id: String): AlbumDetail =
+        if (id.startsWith("dev_")) phoneDetails[id] ?: throw IOException("That album isn't on this phone any more")
+        else details[id] ?: api.album(id).also { details[id] = it }
 
     /* ------------------------------------------------ playing */
 
@@ -302,10 +412,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun play(albumId: String, index: Int? = null, shuffle: Boolean = false) = viewModelScope.launch {
         try {
             val a = detail(albumId)
-            if (a.trackList.isEmpty()) { message = "This album has no playable tracks"; return@launch }
-            if (a.source == "spotify") {
+            if (a.source == "spotify") {   // a playlist Spotify won't list the tracks of still plays
                 controller?.run { stop(); clearMediaItems() }   // this phone's own queue is done with
-                val offset = if (shuffle) Random.nextInt(a.trackList.size) else (index ?: 0)
+                val count = a.trackList.size.takeIf { it > 0 } ?: a.tracks ?: 1
+                val offset = if (shuffle) Random.nextInt(count) else (index ?: 0)
                 api.spotifyPlay(a.uri, offset)
                 spotifyMode = true; upNext = emptyList()
                 nowAlbumId = a.id; nowTitle = a.trackList.getOrNull(offset)?.title ?: a.title; nowArtist = a.artist
@@ -314,9 +424,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 delay(800); pollSpotify()
                 return@launch
             }
+            if (a.trackList.isEmpty()) { message = "This album has no playable tracks"; return@launch }
             val art = a.art?.let { Uri.parse(api.url(it)) }
             val items = a.trackList.map { t ->
-                val uri = if (a.source == "demo") t.uri.orEmpty() else api.streamUrl(t.id)
+                val uri = if (a.source == "demo" || a.source == "device") t.uri.orEmpty() else api.streamUrl(t.id)
                 MediaItem.Builder().setMediaId(t.id).setUri(uri)
                     .setMediaMetadata(
                         MediaMetadata.Builder()
@@ -432,6 +543,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         controllerFuture?.let { MediaController.releaseFuture(it) }
         super.onCleared()
+    }
+
+    private companion object {
+        const val B64 = Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
     }
 }
 

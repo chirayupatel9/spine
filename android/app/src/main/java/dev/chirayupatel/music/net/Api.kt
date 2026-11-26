@@ -31,7 +31,8 @@ import java.util.concurrent.TimeUnit
 @Serializable
 data class Album(
     val id: String,
-    val source: String = "local",
+    val source: String = "local",            // local | spotify | demo | device (on this phone)
+    val kind: String = "album",              // album | playlist
     val title: String = "",
     val artist: String = "",
     val year: String? = null,
@@ -60,6 +61,9 @@ data class Track(
 data class AlbumDetail(
     val id: String,
     val source: String = "local",
+    val kind: String = "album",
+    val tracks: Int? = null,
+    @SerialName("tracks_shared") val tracksShared: Boolean = true,   // Spotify lists a playlist's tracks only for its owner
     val title: String = "",
     val artist: String = "",
     val year: String? = null,
@@ -71,8 +75,24 @@ data class AlbumDetail(
 )
 
 @Serializable data class DemoStatus(val loading: Boolean = false, val albums: Int = 0, val total: Int = 0, val error: String? = null)
-@Serializable data class SpotifyStatus(val configured: Boolean = false, val connected: Boolean = false)
-@Serializable data class Status(val demo: DemoStatus = DemoStatus(), val spotify: SpotifyStatus = SpotifyStatus())
+@Serializable data class SpotifyStatus(val configured: Boolean = false, val connected: Boolean = false, val syncing: Boolean = false)
+@Serializable data class Status(val admin: Boolean = false, val demo: DemoStatus = DemoStatus(), val spotify: SpotifyStatus = SpotifyStatus())
+
+/** Who is signed in. */
+@Serializable
+data class Me(
+    val id: Int = 0,
+    val name: String = "",
+    val email: String = "",
+    val picture: String = "",
+    val admin: Boolean = false,
+    val google: Boolean = false,
+    @SerialName("spotify_id") val spotifyId: String? = null,
+    val spotify: SpotifyStatus = SpotifyStatus(),
+)
+
+@Serializable data class Order(val ids: List<String> = emptyList())
+@Serializable data class Link(val url: String)
 
 /** What Spotify is playing, as the server reports it (all empty when nothing is). */
 @Serializable
@@ -157,16 +177,33 @@ class Api(context: Context) {
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true }
 
     val server: String get() = session.server
-    fun url(path: String): String = if (path.startsWith("http")) path else server + path
+    fun url(path: String): String =
+        if (path.startsWith("http") || path.startsWith("file:") || path.startsWith("content:")) path else server + path
 
     fun hasSession(): Boolean {
         val u = server.toHttpUrlOrNull() ?: return false
-        return jar.loadForRequest(u).any { it.name == "av_auth" }
+        return jar.loadForRequest(u).any { it.name == "av_session" }
+    }
+
+    /** "music.example.com" -> "https://music.example.com"; null if it isn't a web address. */
+    fun normalize(serverInput: String): String? {
+        val base = serverInput.trim().trimEnd('/').let { if (it.startsWith("http://") || it.startsWith("https://")) it else "https://$it" }
+        return base.takeIf { it.toHttpUrlOrNull() != null }
+    }
+
+    /** Finish a Google or Spotify sign-in made in the browser: trade its one-time code (and the secret
+     *  only this app knows) for a session of the app's own. */
+    suspend fun exchangeAppCode(base: String, code: String, verifier: String) = withContext(Dispatchers.IO) {
+        val body = buildJsonObject { put("code", code); put("verifier", verifier) }.toString()
+        val req = Request.Builder().url("$base/auth/app/exchange").post(body.toRequestBody("application/json".toMediaType())).build()
+        noRedirects.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) throw ServerError("That sign-in didn't go through. Try again.")
+            session.server = base
+        }
     }
 
     suspend fun signIn(serverInput: String, password: String) = withContext(Dispatchers.IO) {
-        val base = serverInput.trim().trimEnd('/').let { if (it.startsWith("http://") || it.startsWith("https://")) it else "https://$it" }
-        base.toHttpUrlOrNull() ?: throw ServerError("That isn't a web address")
+        val base = normalize(serverInput) ?: throw ServerError("That isn't a web address")
         val req = Request.Builder().url("$base/login").post(FormBody.Builder().add("password", password).build()).build()
         noRedirects.newCall(req).execute().use { r ->
             when (r.code) {
@@ -187,6 +224,13 @@ class Api(context: Context) {
     fun parseAlbums(text: String): List<Album> = json.decodeFromString(text)
     suspend fun album(id: String): AlbumDetail = json.decodeFromString(getText("/api/albums/" + Uri.encode(id)))
     suspend fun status(): Status = json.decodeFromString(getText("/api/status"))
+    suspend fun me(): Me = json.decodeFromString(getText("/api/me"))
+    suspend fun order(): List<String> = json.decodeFromString<Order>(getText("/api/order")).ids
+    /** A one-time address that connects Spotify to this account in a browser tab, then returns here. */
+    suspend fun spotifyConnectLink(): String = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(url("/api/spotify/connect-link")).post("{}".toRequestBody("application/json".toMediaType())).build()
+        client.newCall(req).execute().use { r -> check(r); json.decodeFromString<Link>(r.body?.string().orEmpty()).url }
+    }
     suspend fun loadDemo() = post("/api/demo/load")
     suspend fun spotifyPlay(uri: String?, offset: Int) =
         post("/api/spotify/play", buildJsonObject { put("uri", uri); put("offset", offset) }.toString())

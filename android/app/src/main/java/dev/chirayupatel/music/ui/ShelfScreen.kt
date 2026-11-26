@@ -2,6 +2,8 @@ package dev.chirayupatel.music.ui
 
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -82,12 +84,14 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -96,6 +100,7 @@ import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.chirayupatel.music.R
+import dev.chirayupatel.music.device.PhoneMusic
 import dev.chirayupatel.music.net.Album
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -199,17 +204,21 @@ fun IconButton(icon: ImageVector, label: String, tint: Color = Palette.Muted, si
 
 @Composable
 private fun SourceSwitch(vm: AppViewModel, modifier: Modifier) {
-    val options = buildList { add("all" to "All"); add("spotify" to "Spotify"); add("local" to "Local"); if (vm.hasDemo) add("demo" to "Demo") }
+    val options = buildList {
+        add("all" to "All"); add("spotify" to "Spotify"); if (vm.hasPlaylists) add("playlist" to "Playlists")
+        add("local" to "Local"); if (vm.hasDemo) add("demo" to "Demo")
+    }
     Row(modifier.clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = .05f)).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for ((key, label) in options) {
-            val on = vm.source == key || (key == "all" && vm.source == "demo" && !vm.hasDemo)
+            val on = vm.source == key || (key == "all" && ((vm.source == "demo" && !vm.hasDemo) || (vm.source == "playlist" && !vm.hasPlaylists)))
             Box(
                 Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(9.dp))
                     .background(if (on) Color.White.copy(alpha = .1f) else Color.Transparent)
                     .clickable { vm.chooseSource(key) },
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label.uppercase(), color = if (on) Palette.Accent else Palette.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = .1.em, maxLines = 1)
+                Text(label.uppercase(), color = if (on) Palette.Accent else Palette.Muted, fontSize = if (options.size > 4) 11.sp else 12.sp,
+                     fontWeight = FontWeight.SemiBold, letterSpacing = if (options.size > 4) .04.em else .1.em, maxLines = 1, overflow = TextOverflow.Clip)
             }
         }
     }
@@ -563,10 +572,24 @@ private fun BoxScope.Glass(vertical: Boolean) {
 
 @Composable
 private fun EmptyShelf(vm: AppViewModel) {
+    val context = LocalContext.current
+    val askForMusic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) vm.enablePhoneMusic() else vm.message = "Album Viewer needs to see your music to show it"
+    }
+    val sp = vm.me?.spotify ?: vm.status?.spotify
     Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Your collection, back on the wall.", color = Palette.Ink, fontFamily = FontFamily.Serif, fontSize = 26.sp)
-        Text("Load the demo shelf, connect Spotify, or add music to your server.", color = Palette.Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
-        PrimaryButton("Load demo shelf") { vm.loadDemo() }
+        Text("Your collection, back on the wall.", color = Palette.Ink, fontFamily = FontFamily.Serif, fontSize = 26.sp, textAlign = TextAlign.Center)
+        Text(
+            "Connect Spotify for your albums and playlists, or show the music on this phone.",
+            color = Palette.Muted, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (sp?.configured == true && !sp.connected) PrimaryButton("Connect Spotify") { vm.connectSpotify { openInBrowser(context, it) } }
+            if (!vm.phoneMusicOn) GhostButton("Show music on this phone") {
+                if (vm.phoneAllowed) vm.enablePhoneMusic() else askForMusic.launch(PhoneMusic.PERMISSION)
+            }
+            if (vm.me?.admin == true) GhostButton("Load demo shelf") { vm.loadDemo() }
+        }
     }
 }
 

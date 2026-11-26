@@ -2,9 +2,11 @@ package dev.chirayupatel.music.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -45,7 +48,10 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SignInScreen(vm: AppViewModel) {
+    val context = LocalContext.current
     var server by remember { mutableStateOf(vm.server.ifBlank { Session.DEFAULT_SERVER }) }
+    var editServer by remember { mutableStateOf(false) }
+    var usePassword by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -56,16 +62,37 @@ fun SignInScreen(vm: AppViewModel) {
             scope.launch { error = vm.signIn(server, password); busy = false }
         }
     }
+    fun continueWith(provider: String) { vm.beginSignIn(provider, server)?.let { openInBrowser(context, it) } }
     Box(Modifier.fillMaxSize().background(Palette.Bg).windowInsetsPadding(WindowInsets.safeDrawing).imePadding(), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 340.dp).fillMaxWidth().padding(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("ALBUM VIEWER", color = Palette.Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp, letterSpacing = .16.em)
             Text("Your collection, back on the wall.", color = Palette.Muted, fontFamily = FontFamily.Serif, fontSize = 20.sp, modifier = Modifier.padding(bottom = 10.dp))
-            Field(server, { server = it }, "Server", KeyboardType.Uri, ImeAction.Next)
-            Field(password, { password = it }, "Password", KeyboardType.Password, ImeAction.Go, hidden = true, onDone = { submit() })
-            error?.let { Text(it, color = Color(0xFFFF8A6B), fontSize = 14.sp) }
-            PrimaryButton(if (busy) "Signing in…" else "Sign in", Modifier.fillMaxWidth().padding(top = 6.dp)) { submit() }
+            ProviderButton("Continue with Google", Color.White, Color(0xFF1F1F1F)) { continueWith("google") }
+            ProviderButton("Continue with Spotify", Color(0xFF1ED760), Color.Black) { continueWith("spotify") }
+            if (vm.authBusy || busy) Text("Signing in…", color = Palette.Muted, fontSize = 14.sp)
+            (vm.authError ?: error)?.let { Text(it, color = Color(0xFFFF8A6B), fontSize = 14.sp) }
+            if (usePassword) {
+                Field(password, { password = it }, "Password", KeyboardType.Password, ImeAction.Go, hidden = true, onDone = { submit() })
+                PrimaryButton(if (busy) "Signing in…" else "Sign in", Modifier.fillMaxWidth()) { submit() }
+            }
+            if (editServer) Field(server, { server = it }, "Server", KeyboardType.Uri, ImeAction.Done)
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    if (editServer) "" else (server.removePrefix("https://").removePrefix("http://")), color = Palette.Faint, fontSize = 13.sp,
+                    maxLines = 1, modifier = Modifier.weight(1f).clickable { editServer = true },
+                )
+                if (!usePassword) Text("Use a password", color = Palette.Muted, fontSize = 13.sp, modifier = Modifier.clickable { usePassword = true })
+            }
         }
     }
+}
+
+@Composable
+private fun ProviderButton(label: String, background: Color, ink: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(50)).background(background).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, color = ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp) }
 }
 
 @Composable

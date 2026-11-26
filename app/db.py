@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS oauth_flows (   -- a sign-in in progress with Google 
     verifier TEXT,                   -- PKCE secret (Google)
     user_id INTEGER,                 -- connecting Spotify to this account, rather than signing in
     app_challenge TEXT,              -- started by the Android app: hand the sign-in back to it
+    app INTEGER DEFAULT 0,           -- connecting Spotify from the Android app: go back to it after
     expires_at REAL
 );
 CREATE TABLE IF NOT EXISTS app_codes (     -- one-time codes passing a sign-in to the Android app
@@ -115,6 +116,8 @@ def _migrate() -> None:
                       ("snapshot", "TEXT")):               # playlists: Spotify's version of its contents
         if name not in cols:
             _conn.execute(f"ALTER TABLE albums ADD COLUMN {name} {ddl}")
+    if "app" not in {r[1] for r in _conn.execute("PRAGMA table_info(oauth_flows)")}:
+        _conn.execute("ALTER TABLE oauth_flows ADD COLUMN app INTEGER DEFAULT 0")
 
 
 _migrate()

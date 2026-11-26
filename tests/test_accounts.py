@@ -179,6 +179,23 @@ def test_connecting_spotify_to_a_google_account(main, fake_google, fake_spotify)
     assert me["spotify"]["connected"] and me["google"]
 
 
+def test_the_android_app_connects_spotify_through_a_one_time_link(main, fake_google, fake_spotify):
+    from app import users
+    phone = google_client(main, fake_google, "g-ji", "ji@example.com")
+    url = phone.post("/api/spotify/connect-link").json()["url"]
+    assert url.startswith("http://127.0.0.1:8000/auth/spotify/start?flow=")
+    browser = TestClient(main.app)                     # a browser tab: not signed in
+    state = _state(browser.get(url[len("http://127.0.0.1:8000"):], follow_redirects=False))
+    fake_spotify["good3"] = {"id": "spuser3", "display_name": "Ji"}
+    r = browser.get(f"/auth/spotify/callback?code=good3&state={state}", follow_redirects=False)
+    assert r.headers["location"] == f"{main.APP_SCHEME}://auth?connected=spotify"
+    me = phone.get("/api/me").json()
+    assert me["spotify"]["connected"] and me["spotify_id"] == "spuser3" and me["google"]
+    assert users.by_spotify("spuser3")["id"] == me["id"]      # one account, not a second one
+    r = browser.get(url[len("http://127.0.0.1:8000"):], follow_redirects=False)   # used up
+    assert r.headers["location"].startswith(f"{main.APP_SCHEME}://auth?error=")
+
+
 def test_a_sign_in_started_in_another_browser_is_refused(main, fake_google):
     fake_google["g-gi"] = {"sub": "g-gi", "email": "gi@example.com", "email_verified": True}
     starter, other = TestClient(main.app), TestClient(main.app)
