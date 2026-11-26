@@ -145,6 +145,19 @@ In `.env`, set `PUBLIC_URL=https://albums.yourdomain.com` and `FORWARDED_ALLOW_I
 
 Keep `data/` backed up: it holds the database (saved order, hidden albums, Spotify sign-in), cached covers and the generated password.
 
+### Updating itself
+The server can put whatever reaches `main` live by itself. `deploy/bad-omen/` has a systemd user timer that runs `autodeploy.sh` every 2 minutes in your clone (`~/album-viewer`):
+- It only ever fast-forwards, and it won't touch a clone with local edits or a `main` that was rewritten.
+- When server code changed, it pulls, rebuilds and restarts the container, then waits up to a minute for `/healthz`. If the new version isn't healthy, it goes back to the one that was running and leaves the broken commit alone until a newer one arrives.
+- Changes that only touch the Android app, tests or docs are pulled without a rebuild.
+
+Set it up once, as the user that runs Album Viewer (it uses `http://127.0.0.1:8090/healthz`; change `HEALTH_URL` in the service if your port differs):
+```sh
+bash ~/album-viewer/deploy/bad-omen/install.sh
+journalctl --user -u album-viewer-deploy -e    # what it did
+```
+It pulls from GitHub (nothing reaches into your server), so it works behind a tunnel or a firewall.
+
 ## Install as an app
 - **Android tablet.** Open the URL in Chrome, then **⋮ → Add to Home screen / Install app**. It opens fullscreen like a native app. For a wall tablet, use Android's *screen pinning* or a kiosk launcher such as Fully Kiosk Browser. To install it from Google Play instead, see [Android app](#android-app).
 - **Windows.** Open the URL in Edge or Chrome, then **⋯ → Apps → Install this site as an app**. For a kiosk screen, run `msedge --kiosk https://albums.yourdomain.com --edge-kiosk-type=fullscreen`.

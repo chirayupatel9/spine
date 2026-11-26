@@ -1,0 +1,4 @@
+# shell scripts and systemd units run on Linux servers: keep their line endings
+*.sh text eol=lf
+deploy/**/*.service text eol=lf
+deploy/**/*.timer text eol=lf

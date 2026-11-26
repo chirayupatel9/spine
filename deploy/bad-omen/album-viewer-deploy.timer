@@ -1,0 +1,10 @@
+[Unit]
+Description=Album Viewer: look for a new version on main every 2 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=2min
+RandomizedDelaySec=10s
+
+[Install]
+WantedBy=timers.target

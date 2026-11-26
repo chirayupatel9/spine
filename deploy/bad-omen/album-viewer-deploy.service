@@ -1,0 +1,9 @@
+[Unit]
+Description=Album Viewer: put what's on main live
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash %h/album-viewer/deploy/bad-omen/autodeploy.sh
+# a rebuild can take a few minutes
+TimeoutStartSec=15min
