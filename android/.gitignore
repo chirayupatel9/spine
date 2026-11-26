@@ -1,0 +1,12 @@
+# Signing keys: never commit. Keep a backup somewhere safe (a password manager, for example).
+*.keystore
+*.jks
+
+# Build output
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+*.idsig

@@ -142,6 +142,16 @@ You can wrap your Album Viewer in a small Android app (a *Trusted Web Activity*)
    ```
    Set the minimum Android version to 24 (Android 7.0) if it asks: the browser-helper library it uses requires it. Its build signs with build-tools 36.1.0 (`sdkmanager "build-tools;36.1.0"`).
 2. Build and sign: `npx @bubblewrap/cli build --skipPwaValidation`. This makes `app-release-bundle.aab` for Play and `app-release-signed.apk` to install directly. **Back up the `.keystore` file and its password**: every update must be signed with it.
+
+   Two snags you may hit on Windows:
+   - *"The provided androidSdk isn't correct"*: Bubblewrap expects a `tools` or `bin` folder at the top of the SDK, which Android Studio's newer layout doesn't have. Create an empty `bin` folder there.
+   - *"'gradlew.bat' is not recognized"*: your shell won't run programs from the current folder (`NoDefaultCurrentDirectoryInExePath` is set). Run Bubblewrap from a normal PowerShell window, or build and sign by hand (`zipalign` and `apksigner` are in the SDK's `build-tools` folder; set `JAVA_HOME` and `ANDROID_HOME` first):
+     ```powershell
+     .\gradlew.bat bundleRelease assembleRelease
+     jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore upload.keystore -signedjar app-release-bundle.aab app\build\outputs\bundle\release\app-release.aab upload
+     zipalign -f -p 4 app\build\outputs\apk\release\app-release-unsigned.apk app-release-unsigned-aligned.apk
+     apksigner sign --ks upload.keystore --ks-key-alias upload --out app-release-signed.apk app-release-unsigned-aligned.apk
+     ```
 3. Tell the server about the app, in `.env`:
    ```bash
    ANDROID_PACKAGE=com.example.albumviewer
