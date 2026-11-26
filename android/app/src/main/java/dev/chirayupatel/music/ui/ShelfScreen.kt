@@ -204,7 +204,7 @@ private fun Brand() = Text("ALBUM VIEWER", color = Palette.Ink, fontWeight = Fon
 
 @Composable
 fun IconButton(icon: ImageVector, label: String, tint: Color = Palette.Muted, size: Dp = 44.dp, iconSize: Dp = 20.dp, onClick: () -> Unit) {
-    Box(Modifier.size(size).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size).pressable(label, onClick = onClick).clip(CircleShape), contentAlignment = Alignment.Center) {
         Icon(icon, label, tint = tint, modifier = Modifier.size(iconSize))
     }
 }
@@ -219,9 +219,8 @@ private fun SourceSwitch(vm: AppViewModel, modifier: Modifier) {
         for ((key, label) in options) {
             val on = vm.source == key || (key == "all" && ((vm.source == "demo" && !vm.hasDemo) || (vm.source == "playlist" && !vm.hasPlaylists)))
             Box(
-                Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(9.dp))
-                    .background(if (on) Color.White.copy(alpha = .1f) else Color.Transparent)
-                    .clickable { vm.chooseSource(key) },
+                Modifier.weight(1f).height(40.dp).pressable(label) { vm.chooseSource(key) }.clip(RoundedCornerShape(9.dp))
+                    .background(if (on) Color.White.copy(alpha = .1f) else Color.Transparent),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label.uppercase(), color = if (on) Palette.Accent else Palette.Muted, fontSize = if (options.size > 4) 11.sp else 12.sp,
@@ -656,21 +655,19 @@ private fun PlayerBar(vm: AppViewModel) {
                 Text(vm.nowArtist, color = Palette.Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             IconButton(AvIcons.Prev, "Previous", tint = Palette.Ink) { vm.prev() }
-            Box(Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = .92f)).clickable { vm.toggle() }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp).pressable(if (vm.isPlaying) "Pause" else "Play") { vm.toggle() }.clip(CircleShape).background(Color.White.copy(alpha = .92f)), contentAlignment = Alignment.Center) {
                 Icon(if (vm.isPlaying) AvIcons.Pause else AvIcons.Play, if (vm.isPlaying) "Pause" else "Play", tint = Color(0xFF111111), modifier = Modifier.size(22.dp))
             }
             IconButton(AvIcons.Next, "Next", tint = Palette.Ink) { vm.next() }
         }
         val frac = if (vm.duration > 0) (vm.position.toFloat() / vm.duration).coerceIn(0f, 1f) else 0f
+        val wave = rememberWave(vm.isPlaying, period = 1200)
         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(fmt(vm.position), color = Palette.Muted, fontSize = 11.sp)
-            Box(
-                Modifier.weight(1f).height(28.dp).pointerInput(Unit) { detectTapGestures { vm.seekTo(it.x / size.width) } },
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = .12f)))
-                Box(Modifier.fillMaxWidth(frac).height(3.dp).clip(RoundedCornerShape(2.dp)).background(Palette.Accent))
-            }
+            Box(   // the progress line: it wiggles while the music plays
+                Modifier.weight(1f).height(28.dp).pointerInput(Unit) { detectTapGestures { vm.seekTo(it.x / size.width) } }
+                    .drawBehind { drawWave(frac, wave, 1.6.dp.toPx(), 16.dp.toPx(), 2.6.dp.toPx(), Palette.Accent, Color.White.copy(alpha = .12f)) },
+            )
             Text(fmt(vm.duration), color = Palette.Muted, fontSize = 11.sp)
         }
         val w = vm.where
@@ -688,14 +685,14 @@ fun fmt(ms: Long): String { val s = (ms / 1000).coerceAtLeast(0); return "%d:%02
 
 @Composable
 fun PrimaryButton(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(Modifier.then(modifier).height(46.dp).clip(RoundedCornerShape(50)).background(Palette.Accent).clickable(onClick = onClick).padding(horizontal = 22.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.then(modifier).height(46.dp).pressable(label, onClick = onClick).clip(RoundedCornerShape(50)).background(Palette.Accent).padding(horizontal = 22.dp), contentAlignment = Alignment.Center) {
         Text(label, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
     }
 }
 
 @Composable
 fun GhostButton(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(Modifier.then(modifier).height(46.dp).clip(RoundedCornerShape(50)).border(1.dp, Color.White.copy(alpha = .18f), RoundedCornerShape(50)).clickable(onClick = onClick).padding(horizontal = 20.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.then(modifier).height(46.dp).pressable(label, onClick = onClick).clip(RoundedCornerShape(50)).border(1.dp, Color.White.copy(alpha = .18f), RoundedCornerShape(50)).padding(horizontal = 20.dp), contentAlignment = Alignment.Center) {
         Text(label, color = Palette.Ink, fontWeight = FontWeight.Medium, fontSize = 15.sp)
     }
 }

@@ -23,8 +23,15 @@
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overscroll-behavior: none; }
-body { display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; overflow: hidden; }
+body { display: flex; flex-direction: column; overflow: hidden; }
 button, input, select { font: inherit; color: inherit; }
+/* Controls aren't text: a long press on them shouldn't select it or pop a callout. Titles, track
+   names and notes stay selectable. */
+button, #room, #topbar, #player, .np-head, .np-stage, .np-ctrl, .wave, .dev-list, #npQueue, #aTracks li, .grab {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+button, a, [role="button"] { touch-action: manipulation; }   /* a tap counts at once, no waiting for a double tap */
+@media (pointer: coarse) { input, select, textarea { font-size: 16px; } }   /* any smaller and iOS zooms in on focus */
 button {
   cursor: pointer; border-radius: 999px; padding: 9px 16px; border: 1px solid var(--line); background: transparent;
   transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out), border-color 160ms var(--ease-out), color 160ms var(--ease-out);
@@ -282,10 +289,8 @@ body.arranging #row { cursor: default; }
 .p-ctrl .big { width: 44px; height: 44px; background: rgba(255,255,255,.92); color: #111 !important; }
 .p-ctrl .big svg { width: 22px; height: 22px; }
 .p-time { flex: 1; display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 0; }
-.p-progress { flex: 1; height: 3px; background: rgba(255,255,255,.12); border-radius: 2px; overflow: hidden; cursor: pointer; position: relative; }
-.p-progress::after { content: ""; position: absolute; inset: -8px 0; }
-#pBar { height: 100%; width: 0; background: var(--accent); transition: width 250ms linear; }   /* bridges the ~4 updates a second */
-#pBar.jump { transition: none; }   /* new track or a seek: no sweep */
+.p-progress { flex: 1; height: 12px; cursor: pointer; position: relative; --f: 0; }
+.p-progress::after { content: ""; position: absolute; inset: -6px 0; }
 .device { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; padding: 6px 8px; }
 body.wallmode #player { position: fixed; inset: auto 0 0 0; transition: transform 300ms var(--ease-out); }
 body.wallmode:not(.peek) #player { transform: translateY(100%); }
@@ -311,8 +316,8 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
 .close { position: absolute; top: 12px; right: 12px; z-index: 2; }
 
 .album-card {
-  position: relative; display: grid; grid-template-columns: minmax(240px, 46vh) minmax(300px, 440px); gap: 32px;
-  background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 28px; max-height: 88vh; max-width: 94vw;
+  position: relative; display: grid; grid-template-columns: minmax(240px, 46dvh) minmax(300px, 440px); gap: 32px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 28px; max-height: 88dvh; max-width: 94vw;
   box-shadow: 0 30px 80px rgba(0,0,0,.6);
 }
 .cover-wrap img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: #222; box-shadow: 0 16px 40px rgba(0,0,0,.5); display: block; }
@@ -340,7 +345,7 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
 
 .panel {
   position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 24px 26px;
-  width: min(540px, 94vw); max-height: 88vh; overflow-y: auto;
+  width: min(540px, 94vw); max-height: 88dvh; overflow-y: auto;
 }
 .panel.small { width: min(380px, 94vw); }
 .panel h2 { font-family: var(--serif); font-weight: 300; font-size: 30px; margin: 0 0 14px; }
@@ -377,7 +382,7 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
 #player { cursor: pointer; }
 .np {
   position: fixed; inset: 0; z-index: 15; overflow: hidden; background: var(--bg); color: var(--ink);
-  --cs: min(calc(100vw - 64px), 42vh, 420px);   /* cover size */
+  --cs: min(calc(100vw - 64px), 42dvh, 420px);   /* cover size */
   --rise: calc(var(--cs) * .19);                /* how far the record rises out of the top of its sleeve */
   transform: translateY(100%); transition: transform 280ms var(--ease-out), --np-c 700ms var(--ease-in-out);
 }
@@ -403,15 +408,15 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
 .np-from b { display: block; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Phones (and any tall screen): everything on one centre line. The cover sits in the middle with its
    record rising out of the top of the sleeve, the title under it, then the controls. */
-.np-stage { position: relative; flex: none; width: var(--cs); height: calc(var(--cs) + var(--rise)); margin: clamp(0px, 1.2vh, 16px) 0 clamp(20px, 3.6vh, 34px); }
+.np-stage { position: relative; flex: none; width: var(--cs); height: calc(var(--cs) + var(--rise)); margin: clamp(0px, 1.2dvh, 16px) 0 clamp(20px, 3.6dvh, 34px); }
 .np-cover {
   position: absolute; left: 0; top: var(--rise); z-index: 1; width: var(--cs); height: var(--cs); object-fit: cover; border-radius: 6px;
   background: var(--np-c); box-shadow: 0 30px 60px -14px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.07);
-  transition: translate 620ms var(--ease-open);
+  transition: translate 500ms var(--ease-open);
 }
 .np .vinyl {
   left: calc(var(--cs) * .05); top: calc(var(--rise) + var(--cs) * .05); width: calc(var(--cs) * .9); height: calc(var(--cs) * .9);
-  transition: translate 620ms var(--ease-open);
+  transition: translate 500ms var(--ease-open);
 }
 .np.out .vinyl { translate: 0 calc(-1 * (var(--rise) + var(--cs) * .05)); }
 .np-body { width: 100%; max-width: 440px; display: flex; flex-direction: column; flex: none; }
@@ -419,14 +424,12 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
 #npTitle { font-family: var(--serif); font-weight: 400; font-size: clamp(22px, 6.2vw, 30px); line-height: 1.18; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #npArtist { color: var(--muted); font-size: 15px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .np-bar { position: relative; height: 28px; cursor: pointer; touch-action: none; --f: 0; }
-.np-track { position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px; background: rgba(255,255,255,.18); overflow: hidden; }
-.np-fill { position: absolute; inset: 0; background: rgba(255,255,255,.9); transform-origin: left; transform: scaleX(var(--f)); transition: transform 250ms linear; }
 .np-thumb {
   position: absolute; top: 50%; left: calc(var(--f) * 100%); width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
   background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); transform: scale(.8);
   transition: left 250ms linear, transform 160ms var(--ease-out);
 }
-.np-bar.jump .np-fill, .np-bar.seeking .np-fill { transition: none; }
+.np-bar.seeking .wave-rest, .np-bar.seeking .wave-done { transition: none; }
 .np-bar.jump .np-thumb, .np-bar.seeking .np-thumb { transition: transform 160ms var(--ease-out); }
 .np-bar.seeking .np-thumb { transform: scale(1.2); }
 .np-bar.fixed { cursor: default; }
@@ -468,7 +471,7 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
 #npQueue .d { color: var(--faint); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 /* wide screens and phones on their side: the record on the left, everything else on the right */
 @media (min-width: 640px) and (min-aspect-ratio: 5/4) {
-  .np { --cs: min(36vw, 58vh, 520px); }
+  .np { --cs: min(36vw, 58dvh, 520px); }
   .np-inner { display: grid; grid-template-columns: auto minmax(300px, 420px); grid-template-rows: auto minmax(0, 1fr); column-gap: clamp(36px, 6vw, 110px); justify-content: center; align-items: center; overflow: hidden; }
   .np-head { grid-column: 1 / -1; max-width: none; }
   /* side by side, the record slides out to the right instead, where there's room */
@@ -640,12 +643,53 @@ body.vertical.wallmode #screen { border-radius: 0; }
   #player .device.remote { display: inline-flex; order: 6; flex-basis: 100%; max-width: none; min-height: 28px; margin-top: -6px; padding: 0 2px; font-size: 12px; font-weight: 500; }
   /* the speaker list rises from the bottom edge, like a phone's own */
   .sheet.speakers { place-items: end center; }
-  .sheet.speakers .panel { width: 100%; max-width: 560px; border-radius: 18px 18px 0 0; border-bottom: 0; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+  .sheet.speakers .panel { width: 100%; max-width: 560px; border-radius: 18px 18px 0 0; border-bottom: 0; padding-top: 18px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+  .sheet.speakers .grab { display: block; }
   .album-card { grid-template-columns: 1fr; overflow-y: auto; padding: 20px; gap: 16px; }
   .cover-wrap img { max-width: 60vw; margin: 0 auto; }
   #aTracks { overflow: visible; }
 }
 @media (max-width: 860px) and (prefers-reduced-motion: no-preference) {
-  .sheet.speakers .panel { transform: translateY(28px); }
-  .sheet.speakers.in .panel { transform: none; }
+  /* in from below on the drawer curve; out faster than in; a drag moves it with the finger */
+  .sheet.speakers .panel { opacity: 1; transform: translateY(100%); transition: transform 240ms var(--ease-out); }
+  .sheet.speakers.in .panel { transform: none; transition: transform 420ms var(--ease-open); }
+  .sheet.speakers .panel.dragging { transition: none; }
 }
+
+/* ------------------------------------------------ the progress line wiggles while the music plays
+   and lies flat when it stops, like Android's own media player. --f is how far along (0 to 1): the
+   played part is a wave clipped to it, the rest a faint straight line. The wave drifts at a constant
+   speed (linear); it rises when the music starts and settles faster when it stops. */
+:root {
+  --wave-big: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='12'%3E%3Cpath d='M0 6C4 2.5 8 2.5 12 6S20 9.5 24 6' fill='none' stroke='%23000' stroke-width='3.2'/%3E%3C/svg%3E");
+  --wave-small: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='8'%3E%3Cpath d='M0 4C2.7 2.2 5.3 2.2 8 4S13.3 5.8 16 4' fill='none' stroke='%23000' stroke-width='2.2'/%3E%3C/svg%3E");
+}
+.wave { --wl: 24px; --wh: 12px; --lw: 4px; --wave-c: rgba(255,255,255,.92); }
+.wave.small { --wl: 16px; --wh: 8px; --lw: 3px; }
+.p-progress.wave { --wave-c: var(--accent); }
+.wave-rest, .wave-flat { position: absolute; left: 0; right: 0; top: 50%; height: var(--lw); margin-top: calc(var(--lw) / -2); border-radius: 2px; }
+.wave-rest { background: rgba(255,255,255,.16); clip-path: inset(0 0 0 calc(var(--f) * 100%)); transition: clip-path 250ms linear; }
+.wave-done { position: absolute; inset: 0; clip-path: inset(0 calc((1 - var(--f)) * 100%) 0 0); transition: clip-path 250ms linear; }
+.wave-flat { background: var(--wave-c); opacity: 1; transition: opacity 160ms var(--ease-out); }
+.wave-amp {
+  position: absolute; left: 0; right: 0; top: 50%; height: var(--wh); margin-top: calc(var(--wh) / -2); overflow: hidden;
+  transform: scaleY(.2); opacity: 0; transition: transform 200ms var(--ease-out), opacity 160ms var(--ease-out);
+}
+.wave-line {
+  position: absolute; top: 0; bottom: 0; left: 0; width: calc(100% + var(--wl)); background: var(--wave-c);
+  -webkit-mask: var(--wave-big) repeat-x 0 50% / var(--wl) var(--wh); mask: var(--wave-big) repeat-x 0 50% / var(--wl) var(--wh);
+  animation: wave-drift 1.6s linear infinite paused;
+}
+.wave.small .wave-line { -webkit-mask-image: var(--wave-small); mask-image: var(--wave-small); animation-duration: 1.2s; }
+@keyframes wave-drift { to { transform: translateX(calc(-1 * var(--wl))); } }
+.wave.on .wave-amp { transform: none; opacity: 1; transition: transform 320ms var(--ease-out), opacity 240ms var(--ease-out); }
+.wave.on .wave-flat { opacity: 0; transition-duration: 240ms; }
+.wave.on .wave-line { animation-play-state: running; }
+.wave.jump .wave-rest, .wave.jump .wave-done { transition: none; }   /* a new track or a seek: no sweep */
+@media (prefers-reduced-motion: reduce) {
+  .wave .wave-amp { display: none; }
+  .wave .wave-flat { opacity: 1; }
+}
+
+/* the speaker drawer's handle (phones) */
+.grab { display: none; width: 36px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.22); margin: -6px auto 12px; }

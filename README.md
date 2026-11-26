@@ -153,9 +153,11 @@ Keep `data/` backed up: it holds the database (saved order, hidden albums, Spoti
 `android/` is a native Android app (Kotlin and Jetpack Compose) that talks to your server:
 - **Phones:** the vertical stack of spines with momentum scrolling and an A–Z rail you slide along (in orders without letters, a handle you drag). The spine under your finger lifts. Tap a spine to open it into its cover and play it; its record slides out of the sleeve and turns while it plays. Hold one, then drag it to rearrange the shelf. The order is saved on the server, so every screen shares it; holding an album while another arrangement is showing switches to your own order, starting from what's on screen.
 - **Tablets and landscape:** the wall shelf in its bezel.
-- **Now playing:** tap the player bar, or swipe it up, for the full-screen player: the cover with its record rising out of the sleeve and turning while it plays, a seek bar, shuffle, repeat (the album or one track), where it's playing, and Up next. Swipe down or press Back to put it away.
+- **Now playing:** tap the player bar, or swipe it up, for the full-screen player: the cover with its record rising out of the sleeve and turning while it plays, a progress line that wiggles while the music plays, shuffle, repeat (the album or one track), where it's playing, and Up next. Swipe down or press Back to put it away.
 - **Playback:** your own music and the demo shelf play in a background service (Media3), with lock-screen and notification controls, artwork, a draggable position bar, and Bluetooth and headphone buttons. Spotify plays in the phone's Spotify app; if Spotify isn't open, the app opens it and starts the album when you come back. The speaker button in the player moves Spotify to any of your Spotify speakers, or, for your own music, opens Android's list of outputs.
 - **Instant start:** it opens on the last shelf it saw, then refreshes.
+- **Widget:** a home-screen widget (4 × 1) shows what's playing, with previous, play/pause and next, for your own music and for Spotify.
+- **Spotify on the phone:** if Spotify isn't running, the app starts it in the background and plays there, without switching to it; only if that fails does it open Spotify.
 - **Sign-in:** Google or Spotify in a browser tab, or the server's password where Google sign-in isn't set up. The session is kept in the app's private storage.
 
 ### Releasing to Google Play automatically

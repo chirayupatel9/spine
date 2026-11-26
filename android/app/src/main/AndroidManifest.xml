@@ -55,6 +55,19 @@
             </intent-filter>
         </activity>
 
+        <!-- The home-screen widget: what's playing, with previous, play/pause and next. -->
+        <receiver
+            android:name=".ui.NowPlayingWidget"
+            android:exported="false"
+            android:label="@string/widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_now_playing_info" />
+        </receiver>
+
         <!-- Plays local and demo music in the background, with lock-screen and notification
              controls, Bluetooth buttons and Android Auto-style media controls. -->
         <service

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#0c0a08">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -101,7 +101,7 @@
       <button class="icon big" id="pToggle" title="Play/pause"><svg><use href="#i-pause"/></svg></button>
       <button class="icon" id="pNext" title="Next"><svg><use href="#i-next"/></svg></button>
     </div>
-    <div class="p-time"><span id="pPos">0:00</span><div class="p-progress"><div id="pBar"></div></div><span id="pDur">0:00</span></div>
+    <div class="p-time"><span id="pPos">0:00</span><div class="p-progress wave small" id="pBar"><i class="wave-rest"></i><span class="wave-done"><i class="wave-flat"></i><i class="wave-amp"><i class="wave-line"></i></i></span></div><span id="pDur">0:00</span></div>
     <button class="device" id="pDevice" title="Choose a speaker"><svg><use href="#i-speaker"/></svg><span id="pDeviceName"></span></button>
   </footer>
 
@@ -121,7 +121,7 @@
       <div class="np-body">
         <div class="np-meta"><div id="npTitle"></div><div id="npArtist"></div></div>
         <div class="np-seek">
-          <div class="np-bar" id="npBar"><div class="np-track"><div class="np-fill" id="npFill"></div></div><div class="np-thumb" id="npThumb"></div></div>
+          <div class="np-bar wave" id="npBar"><i class="wave-rest"></i><span class="wave-done"><i class="wave-flat"></i><i class="wave-amp"><i class="wave-line"></i></i></span><div class="np-thumb" id="npThumb"></div></div>
           <div class="np-times"><span id="npPos">0:00</span><span id="npDur">0:00</span></div>
         </div>
         <div class="np-ctrl">
@@ -241,6 +241,7 @@
   <div id="deviceSheet" class="sheet speakers" hidden>
     <div class="sheet-bg" data-close></div>
     <div class="panel small">
+      <i class="grab" aria-hidden="true"></i>
       <button class="close icon" data-close title="Close"><svg><use href="#i-close"/></svg></button>
       <h2>Play on</h2>
       <div id="deviceList" class="dev-list"></div>

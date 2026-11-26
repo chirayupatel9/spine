@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 4 x 1 on the home screen; it can be made wider or narrower. The app and the playback service
+     update it as the music changes, so it never polls. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/widget_now_playing"
+    android:minWidth="250dp"
+    android:minHeight="56dp"
+    android:minResizeWidth="200dp"
+    android:previewLayout="@layout/widget_now_playing"
+    android:resizeMode="horizontal"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

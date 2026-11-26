@@ -135,6 +135,9 @@ function flip(els, mutate, ms = 200) {
 /* ======================================================== arranging */
 
 const artistKey = s => (s || "").replace(/^the\s+/i, "").trim();
+/* Who an album is by, for sorting and the A-Z rail. A playlist goes by its own name: the shelf
+   doesn't show who made it. */
+const byName = a => a.kind === "playlist" ? a.title : a.artist;
 const cmp = (a, b) => (a || "").localeCompare(b || "", undefined, { sensitivity: "base", numeric: true });
 
 function hueKey(hex) {
@@ -147,8 +150,8 @@ function hueKey(hex) {
 }
 
 const SORTS = {
-  artist: (a, b) => cmp(artistKey(a.artist), artistKey(b.artist)) || cmp(a.year, b.year) || cmp(a.title, b.title),
-  decade: (a, b) => cmp(a.year || "9999", b.year || "9999") || cmp(artistKey(a.artist), artistKey(b.artist)),
+  artist: (a, b) => cmp(artistKey(byName(a)), artistKey(byName(b))) || cmp(a.year, b.year) || cmp(a.title, b.title),
+  decade: (a, b) => cmp(a.year || "9999", b.year || "9999") || cmp(artistKey(byName(a)), artistKey(byName(b))),
   added: (a, b) => (b.added_at || 0) - (a.added_at || 0),
   title: (a, b) => cmp(a.title, b.title),
   color: (a, b) => hueKey(a.color) - hueKey(b.color),
@@ -160,12 +163,12 @@ const inSource = a => S.source === "all" || (S.source === "playlist" ? a.kind ==
 function visibleAlbums() {
   const q = S.search.trim().toLowerCase();
   return S.albums.filter(a => inSource(a) &&
-    (!q || a.title.toLowerCase().includes(q) || a.artist.toLowerCase().includes(q))).sort(SORTS[S.sort]);
+    (!q || a.title.toLowerCase().includes(q) || (a.kind !== "playlist" && a.artist.toLowerCase().includes(q)))).sort(SORTS[S.sort]);
 }
 
 function indexKey(a) {
   if (S.sort === "artist" || S.sort === "title") {
-    const c = (S.sort === "artist" ? artistKey(a.artist) : a.title.replace(/^the\s+/i, "")).normalize("NFKD")[0]?.toUpperCase() || "#";
+    const c = (S.sort === "artist" ? artistKey(byName(a)) : a.title.replace(/^the\s+/i, "")).normalize("NFKD")[0]?.toUpperCase() || "#";
     return /[A-Z]/.test(c) ? c : "#";
   }
   if (S.sort === "decade") return a.year ? `${a.year.slice(0, 3)}0s` : "Undated";
@@ -221,9 +224,10 @@ function makeSpine(a) {
   el.dataset.id = a.id;
   el.dataset.w = w;
   el.setAttribute("role", "listitem");
-  el.setAttribute("aria-label", `${a.artist}, ${a.title}`);
-  el.title = `${a.artist} — ${a.title}${a.year ? ` (${a.year})` : ""}`;
-  el.innerHTML = `<span class="lbl"><b>${esc(a.artist)}</b><span>${esc(a.title)}</span></span><i class="mark"></i>`;
+  const list = a.kind === "playlist";
+  el.setAttribute("aria-label", list ? `${a.title}, playlist` : `${a.artist}, ${a.title}`);
+  el.title = list ? a.title : `${a.artist} — ${a.title}${a.year ? ` (${a.year})` : ""}`;
+  el.innerHTML = `<span class="lbl">${list ? "" : `<b>${esc(a.artist)}</b>`}<span>${esc(a.title)}</span></span><i class="mark"></i>`;
   return el;
 }
 
@@ -924,7 +928,7 @@ async function openSheet(id, fromEl) {
   $("#aCover").src = a.art || "";
   $("#aCover").style.background = a.color;
   $("#aTitle").textContent = a.title;
-  $("#aArtist").textContent = a.kind === "playlist" ? `By ${a.artist}` : a.artist + (a.year ? ` · ${a.year}` : "");
+  $("#aArtist").textContent = a.kind === "playlist" ? (a.tracks ? `${a.tracks} songs` : "") : a.artist + (a.year ? ` · ${a.year}` : "");
   $("#aSource").textContent = a.kind === "playlist" ? "Spotify playlist" :
     { spotify: "Spotify", demo: "Demo shelf · 30-second previews", device: "On this computer" }[a.source] ||
     "Music folder" + (a.art_status === "missing" ? " · no cover found" : "");
@@ -1229,14 +1233,17 @@ const Player = {
     if (title !== undefined) $("#pTitle").textContent = title;
     if (artist !== undefined) $("#pArtist").textContent = artist;
     if (art !== undefined) $("#pCover").src = art || "";
-    if (playing !== undefined) { $("#pToggle").innerHTML = icon(playing ? "pause" : "play"); }
+    if (playing !== undefined) {
+      $("#pToggle").innerHTML = icon(playing ? "pause" : "play");
+      $("#pBar").classList.toggle("on", !!playing);   // the line wiggles while it plays
+    }
     if (dur !== undefined) $("#pDur").textContent = fmt(dur || 0);
     if (pos !== undefined) {
       $("#pPos").textContent = fmt(pos);
-      const d = dur ?? this._dur ?? 0, pct = d ? Math.min(100, (pos / d) * 100) : 0, bar = $("#pBar");
-      bar.classList.toggle("jump", pct < (this._pct ?? 0) || pct - (this._pct ?? 0) > 6);   // glide forward, snap otherwise
-      bar.style.width = pct + "%";
-      this._pct = pct;
+      const d = dur ?? this._dur ?? 0, f = d ? Math.min(1, pos / d) : 0, bar = $("#pBar");
+      bar.classList.toggle("jump", f < (this._f ?? 0) || f - (this._f ?? 0) > 0.06);   // glide forward, snap otherwise
+      bar.style.setProperty("--f", f.toFixed(4));
+      this._f = f;
     }
     if (dur !== undefined) this._dur = dur;
     NP.sync(o);
@@ -1354,7 +1361,7 @@ const NP = {
     if (o.title !== undefined) $("#npTitle").textContent = o.title;
     if (o.artist !== undefined) $("#npArtist").textContent = o.artist;
     if (o.art !== undefined) this.cover(o.art);
-    if (o.playing !== undefined) { $("#npToggle").innerHTML = icon(o.playing ? "pause" : "play"); this.spin(); }
+    if (o.playing !== undefined) { $("#npToggle").innerHTML = icon(o.playing ? "pause" : "play"); npBar.classList.toggle("on", !!o.playing); this.spin(); }
     if (o.dur !== undefined) $("#npDur").textContent = fmt(o.dur || 0);
     if (o.pos !== undefined && !this.seeking) this.setPos(o.pos, o.dur ?? Player.cur.dur);
     if (o.pos !== undefined || o.dur !== undefined) npBar.classList.toggle("fixed", !Player.canSeek());
@@ -1460,7 +1467,7 @@ function endPull() {
   if (!was) return;
   np.classList.remove("dragging");
   np.style.transform = "";
-  if (Pull.dy > Math.min(150, innerHeight * 0.22) || Pull.v > 0.5) NP.close();   // otherwise it springs back up
+  if (Pull.dy > Math.min(150, innerHeight * 0.22) || Pull.v > 0.11) NP.close();   // otherwise it springs back up
 }
 np.addEventListener("touchend", endPull);
 np.addEventListener("touchcancel", endPull);
@@ -1587,6 +1594,7 @@ const Speakers = {
     }
   },
 
+  close() { reveal($("#deviceSheet"), false, 260); },
   async open({ retry } = {}) {
     this.retry = retry || null;
     const spotify = Player.mode === "spotify" || !!retry;
@@ -1608,7 +1616,7 @@ const Speakers = {
   /* Your own music plays in this page, through whatever this device plays sound through. */
   renderHere() {
     $("#deviceList").innerHTML = this.row({ icon: this.sink ? "speaker" : HERE.icon, name: this.sink?.label || HERE.name, sub: "Playing here", on: true });
-    $("#deviceList button").onclick = () => reveal($("#deviceSheet"), false);
+    $("#deviceList button").onclick = () => this.close();
     $("#devHint").textContent = (HERE.type === "Computer"
       ? "Your music plays through this computer's sound output, which you change in its sound settings."
       : `Your music plays on ${HERE.name.toLowerCase()}. To hear it on Bluetooth headphones or a speaker, connect them to it.`)
@@ -1632,7 +1640,7 @@ const Speakers = {
   async choose(d) {
     haptic(6);
     this.chosen = { id: d.id, name: d.name };
-    reveal($("#deviceSheet"), false);
+    this.close();
     if (this.retry) { const [album, index] = this.retry; this.retry = null; return Player.playSpotify(album, index); }
     if (Player.mode !== "spotify") return;
     const id = d.id === "sdk" ? await Sdk.device() : d.id;
@@ -1651,13 +1659,43 @@ const Speakers = {
       const out = await navigator.mediaDevices.selectAudioOutput();
       await audio.setSinkId(out.deviceId);
       this.sink = { label: out.label || "Another speaker" };
-      reveal($("#deviceSheet"), false);
+      this.close();
       this.paint();
     } catch (e) { if (!["NotAllowedError", "AbortError"].includes(e.name)) toast(e.message); }
   },
 };
 $("#devRefresh").onclick = async () => { $("#deviceList").innerHTML = '<div class="hint">Looking for speakers…</div>'; await Speakers.fetch(); Speakers.renderSpotify(); };
 $("#devPick").onclick = () => Speakers.pickOutput();
+
+/* Phones: drag the speaker drawer down to put it away. It follows the finger; let go far enough, or
+   with a flick, and it goes, otherwise it settles back. Pulling it up meets more and more friction. */
+{
+  const panel = $("#deviceSheet .panel");
+  let y0 = null, dy = 0, t0 = 0, id = null;
+  panel.addEventListener("pointerdown", e => {
+    if (e.pointerType !== "touch" || y0 !== null || panel.scrollTop > 0 || !matchMedia("(max-width: 860px)").matches) return;
+    y0 = e.clientY; dy = 0; t0 = performance.now(); id = e.pointerId;
+  });
+  panel.addEventListener("pointermove", e => {
+    if (y0 === null || e.pointerId !== id) return;   // one finger only
+    const d = e.clientY - y0;
+    if (!panel.classList.contains("dragging")) {
+      if (Math.abs(d) < 6) return;
+      panel.classList.add("dragging");
+      try { panel.setPointerCapture(id); } catch {}
+    }
+    dy = d > 0 ? d : -Math.pow(-d, 0.7);   // friction going up, not a wall
+    panel.style.transform = `translateY(${dy}px)`;
+  });
+  const end = e => {
+    if (y0 === null || e.pointerId !== id) return;
+    const dragged = panel.classList.contains("dragging"), v = dy / Math.max(1, performance.now() - t0);
+    y0 = null; panel.classList.remove("dragging"); panel.style.transform = "";
+    if (dragged && dy > 0 && (dy > panel.offsetHeight * 0.3 || v > 0.11)) Speakers.close();
+  };
+  panel.addEventListener("pointerup", end);
+  panel.addEventListener("pointercancel", end);
+}
 
 /* ======================================================== settings + status */
 
@@ -1923,7 +1961,7 @@ $("#sort").onchange = e => { S.sort = e.target.value; store.set("sort", S.sort);
 let searchT;
 $("#search").oninput = e => { clearTimeout(searchT); searchT = setTimeout(() => { S.search = e.target.value; render(); }, 120); };
 
-function closeSheets() { $$(".sheet").forEach(s => (s.id === "albumSheet" ? closeAlbum() : reveal(s, false))); }
+function closeSheets() { $$(".sheet").forEach(s => (s.id === "albumSheet" ? closeAlbum() : s.id === "deviceSheet" ? Speakers.close() : reveal(s, false))); }
 document.addEventListener("click", e => { if (e.target.closest("[data-close]")) closeSheets(); });
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") { if ($$(".sheet").some(s => s.classList.contains("in"))) closeSheets(); else NP.close(); }

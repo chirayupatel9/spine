@@ -74,8 +74,8 @@ fun AlbumSheet(vm: AppViewModel) {
                         modifier = Modifier.padding(top = 20.dp),
                     )
                     Text(a.title, color = Palette.Ink, fontFamily = FontFamily.Serif, fontSize = 26.sp, lineHeight = 1.15.em, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
-                    Text(if (a.kind == "playlist") "By ${a.artist}" else a.artist + (a.year?.let { " · $it" } ?: ""),
-                         color = Palette.Muted, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp, bottom = 18.dp))
+                    val by = if (a.kind == "playlist") a.tracks?.let { "$it songs" }.orEmpty() else a.artist + (a.year?.let { " · $it" } ?: "")
+                    Text(by, color = Palette.Muted, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp, bottom = 18.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PrimaryButton(if (mine && vm.isPlaying) "Pause" else if (mine) "Resume" else "Play") {
                             if (mine) vm.toggle() else { vm.openId = a.id; vm.play(a.id) }

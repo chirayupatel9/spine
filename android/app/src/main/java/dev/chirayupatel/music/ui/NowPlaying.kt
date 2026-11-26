@@ -1,5 +1,6 @@
 package dev.chirayupatel.music.ui
 
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -45,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -105,6 +107,8 @@ private fun NowPlayingScreen(vm: AppViewModel) {
     val scroll = rememberScrollState()
     var pull by remember { mutableFloatStateOf(0f) }   // how far it has been pulled down
     val closeAt = with(density) { 140.dp.toPx() }
+    val flick = with(density) { .11.dp.toPx() }   // per millisecond, over the whole pull: a quick flick is enough
+    var pullStart by remember { mutableLongStateOf(0L) }
     // Pulling down from the top moves the whole screen; let go far or fast enough and it closes.
     val connection = remember {
         object : NestedScrollConnection {
@@ -113,12 +117,17 @@ private fun NowPlayingScreen(vm: AppViewModel) {
                 return Offset.Zero
             }
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (available.y > 0f && source == NestedScrollSource.UserInput) { pull += available.y; return Offset(0f, available.y) }
+                if (available.y > 0f && source == NestedScrollSource.UserInput) {
+                    if (pull == 0f) pullStart = SystemClock.uptimeMillis()
+                    pull += available.y
+                    return Offset(0f, available.y)
+                }
                 return Offset.Zero
             }
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (pull <= 0f) return Velocity.Zero
-                if (pull > closeAt || available.y > 1600f) vm.showPlayer = false
+                val speed = pull / max(1L, SystemClock.uptimeMillis() - pullStart)
+                if (pull > closeAt || (available.y > 0f && speed > flick)) vm.showPlayer = false
                 else animate(pull, 0f, animationSpec = spring(dampingRatio = .85f, stiffness = 600f)) { v, _ -> pull = v }
                 return available
             }
@@ -184,7 +193,7 @@ private fun Header(vm: AppViewModel, from: String) {
 private fun Stage(vm: AppViewModel, cs: Dp, tint: Color, wide: Boolean) {
     var out by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(220); out = true }
-    val f by animateFloatAsState(if (out) 1f else 0f, tween(620, easing = OpenEasing), label = "out")
+    val f by animateFloatAsState(if (out) 1f else 0f, tween(500, easing = OpenEasing), label = "out")
     val shape = RoundedCornerShape(6.dp)
     if (wide) Box(Modifier.size(width = cs * 1.25f, height = cs)) {
         Vinyl(
@@ -229,7 +238,7 @@ private fun Controls(vm: AppViewModel) {
         Toggle(AvIcons.Shuffle, if (vm.shuffleOn) "Shuffle is on" else "Shuffle", on = vm.shuffleOn) { vm.toggleShuffle() }
         IconButton(AvIcons.Prev, "Previous", tint = Palette.Ink, size = 56.dp, iconSize = 30.dp) { vm.prev() }
         Box(
-            Modifier.size(72.dp).shadow(12.dp, CircleShape).clip(CircleShape).background(Color.White).clickable { vm.toggle() },
+            Modifier.size(72.dp).pressable(if (vm.isPlaying) "Pause" else "Play") { vm.toggle() }.shadow(12.dp, CircleShape).clip(CircleShape).background(Color.White),
             contentAlignment = Alignment.Center,
         ) { Icon(if (vm.isPlaying) AvIcons.Pause else AvIcons.Play, if (vm.isPlaying) "Pause" else "Play", tint = Color(0xFF111111), modifier = Modifier.size(32.dp)) }
         IconButton(AvIcons.Next, "Next", tint = Palette.Ink, size = 56.dp, iconSize = 30.dp) { vm.next() }
@@ -249,8 +258,8 @@ private fun SpeakerPill(vm: AppViewModel) {
     val w = vm.where
     val color = if (w.remote) Palette.Accent else Palette.Muted
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(if (w.remote) Palette.Accent.copy(alpha = .14f) else Color.White.copy(alpha = .07f))
-            .clickable(onClickLabel = "Choose a speaker") { vm.openSpeakers() }
+        Modifier.pressable("Choose a speaker") { vm.openSpeakers() }.clip(RoundedCornerShape(50))
+            .background(if (w.remote) Palette.Accent.copy(alpha = .14f) else Color.White.copy(alpha = .07f))
             .padding(start = 12.dp, end = 13.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -266,7 +275,7 @@ private fun SpeakerPill(vm: AppViewModel) {
 /** Shuffle and repeat: lit in the accent colour with a dot beneath when on ("1" for one track). */
 @Composable
 private fun Toggle(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, on: Boolean, one: Boolean = false, onClick: () -> Unit) {
-    Box(Modifier.size(52.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(52.dp).pressable(label, onClick = onClick).clip(CircleShape), contentAlignment = Alignment.Center) {
         Icon(icon, label, tint = if (on) Palette.Accent else Palette.Muted, modifier = Modifier.size(24.dp))
         if (on) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp).size(4.dp).background(Palette.Accent, CircleShape))
         if (one) Box(
@@ -289,6 +298,7 @@ private fun SeekBar(vm: AppViewModel) {
     }
     val f = preview ?: shown.value
     val grow by animateFloatAsState(if (preview != null) 1.25f else 1f, tween(160, easing = OutEasing), label = "thumb")
+    val wave = rememberWave(vm.isPlaying)
     Box(
         Modifier.fillMaxWidth().padding(top = 14.dp).height(32.dp)
             .pointerInput(canSeek) { if (canSeek) detectTapGestures { vm.seekTo((it.x / size.width).coerceIn(0f, 1f)) } }
@@ -300,11 +310,8 @@ private fun SeekBar(vm: AppViewModel) {
                 ) { change, _ -> preview = (change.position.x / size.width).coerceIn(0f, 1f); change.consume() }
             }
             .drawBehind {
-                val y = size.height / 2
-                val h = 4.dp.toPx()
-                drawRoundRect(Color.White.copy(alpha = .18f), Offset(0f, y - h / 2), androidx.compose.ui.geometry.Size(size.width, h), androidx.compose.ui.geometry.CornerRadius(h / 2))
-                drawRoundRect(Color.White.copy(alpha = .9f), Offset(0f, y - h / 2), androidx.compose.ui.geometry.Size(size.width * f, h), androidx.compose.ui.geometry.CornerRadius(h / 2))
-                if (canSeek) drawCircle(Color.White, 7.dp.toPx() * grow, Offset(size.width * f, y))
+                drawWave(f, wave, 3.dp.toPx(), 24.dp.toPx(), 4.dp.toPx(), Color.White.copy(alpha = .92f), Color.White.copy(alpha = .16f))
+                if (canSeek) drawCircle(Color.White, 7.dp.toPx() * grow, Offset(size.width * f, size.height / 2))
             },
     )
     Row(Modifier.fillMaxWidth()) {

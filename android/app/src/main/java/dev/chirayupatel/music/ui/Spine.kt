@@ -154,16 +154,18 @@ fun Spine(
             .then(if (lifted) Modifier.border(2.dp, Palette.Accent) else Modifier)
             .then(if (ghost) Modifier else Modifier.hoverable(interaction)
                 .combinedClickable(interactionSource = interaction, indication = null, onClick = onTap, onLongClick = onHold, onLongClickLabel = "Move"))
-            .semantics { contentDescription = "${a.artist}, ${a.title}" },
+            .semantics { contentDescription = if (a.kind == "playlist") "${a.title}, playlist" else "${a.artist}, ${a.title}" },
     ) {
         if (labelAlpha > 0f) {
             val labelRow: @Composable () -> Unit = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        a.artist.uppercase(), color = ink, fontSize = fs, fontWeight = FontWeight.Bold,
-                        letterSpacing = .12.em, maxLines = 1, softWrap = false,
-                    )
-                    Spacer(Modifier.width((fsDp * 0.9f).dp))
+                    if (a.kind != "playlist") {   // a playlist goes by its name alone, not who made it
+                        Text(
+                            a.artist.uppercase(), color = ink, fontSize = fs, fontWeight = FontWeight.Bold,
+                            letterSpacing = .12.em, maxLines = 1, softWrap = false,
+                        )
+                        Spacer(Modifier.width((fsDp * 0.9f).dp))
+                    }
                     Text(
                         a.title, color = ink.copy(alpha = .82f),
                         fontSize = if (serif) fs * 1.12f else fs,
@@ -224,7 +226,7 @@ fun Spine(
                     verticalArrangement = Arrangement.Bottom,
                 ) {
                     Text(a.title, color = ink, fontFamily = FontFamily.Serif, fontSize = with(density) { (cross * .075f).toSp() }, lineHeight = 1.05.em)
-                    Text(a.artist, color = ink.copy(alpha = .8f), fontSize = with(density) { (cross * .042f).toSp() })
+                    if (a.kind != "playlist") Text(a.artist, color = ink.copy(alpha = .8f), fontSize = with(density) { (cross * .042f).toSp() })
                 }
             }
         }

@@ -163,7 +163,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "local" -> a.source == "local" || a.source == "device"
             else -> a.source == src
         }
-        arrange(albums.filter { inSource(it) && (q.isEmpty() || it.title.lowercase().contains(q) || it.artist.lowercase().contains(q)) }, sort)
+        arrange(albums.filter { inSource(it) && (q.isEmpty() || it.title.lowercase().contains(q) || (it.kind != "playlist" && it.artist.lowercase().contains(q))) }, sort)
     }
 
     /** The A-Z (or decade) jumps: each key with the index of its first album. */
@@ -226,6 +226,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         loaded = false; openId = null; sheet = null; showSettings = false; showPlayer = false
         nowAlbumId = null; nowTitle = ""; spotifyMode = false; upNext = emptyList()
         chosenDeviceId = null; pending = null; speakerSheet = false
+        NowPlayingWidget.clear(getApplication())
         signedIn = false
     }
 
@@ -456,8 +457,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val a = detail(albumId)
             if (a.source == "spotify") {   // a playlist Spotify won't list the tracks of still plays
-                val target = spotifyTarget()
-                if (target?.id == null) {   // Spotify isn't open on this phone: ask where to play
+                var target = spotifyTarget()
+                if (target?.id == null && Speakers.spotifyInstalled(getApplication())) {
+                    // Spotify isn't running on this phone: start it in the background, without leaving
+                    // this app, and play here as soon as the phone shows up among the speakers.
+                    message = "Starting Spotify on this phone…"
+                    target = wakeSpotifyHere()
+                    if (target != null) message = null
+                }
+                if (target?.id == null) {   // still nowhere to play: ask where
                     pending = Pending(a.id, index, shuffle)
                     speakerSheet = true
                     return@launch
@@ -505,6 +513,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (spotifyMode) {
             val action = if (isPlaying) "pause" else "resume"
             isPlaying = !isPlaying
+            NowPlayingWidget.show(getApplication(), nowTitle, nowArtist, isPlaying, spotify = true, art = nowArt)
             spotify(action)
             return
         }
@@ -571,6 +580,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         repeatMode = when (s.repeat) { "context" -> Player.REPEAT_MODE_ALL; "track" -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF }
         val mine = albums.firstOrNull { it.id == s.albumId }
         nowArt = mine?.art?.let(::artUrl) ?: s.image   // the server's copy of the cover, so it doesn't load twice
+        NowPlayingWidget.show(getApplication(), nowTitle, nowArtist, isPlaying, spotify = true, art = nowArt)
         if (s.albumId != null && s.albumId != nowAlbumId) {
             nowAlbumId = s.albumId
             if (mine != null) openId = mine.id
@@ -584,6 +594,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (spotifyMode) { spotifyMode = false; viewModelScope.launch { runCatching { api.spotifyControl("pause") } } }
             controller?.run { stop(); clearMediaItems() }
             nowAlbumId = null; nowTitle = ""; isPlaying = false; showPlayer = false; upNext = emptyList()
+            NowPlayingWidget.clear(getApplication())
         }
         openId = null
         sheet = null
@@ -636,24 +647,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun closeSpeakers() { speakerSheet = false; if (awaitingSpotify == 0L) pending = null }
 
     /** Spotify isn't open on this phone: open it, and play here when you come back. */
+    /** Start Spotify on this phone in the background and wait (up to about 8 s) for it to show up
+     *  among your Spotify speakers. */
+    private suspend fun wakeSpotifyHere(): SpotifyDevice? {
+        val letGo = Speakers.wakeSpotify(getApplication())
+        try { return waitForPhone(8) } finally { letGo() }
+    }
+
+    private suspend fun waitForPhone(seconds: Int): SpotifyDevice? {
+        for (attempt in 0 until seconds) {   // Spotify takes a moment to tell its servers the phone is here
+            delay(1000)
+            val phone = try { Speakers.thisPhone(getApplication(), loadDevices()) } catch (e: IOException) { null }
+            if (phone != null) return phone
+        }
+        return null
+    }
+
+    /** The background start didn't do it: open Spotify (behind this app where the phone allows), and
+     *  play here the moment the phone shows up, whether or not you've come back yet. */
     fun openSpotifyHere() {
         if (!Speakers.openSpotify(getApplication())) { message = "Install Spotify on this phone to play Spotify here"; return }
         awaitingSpotify = SystemClock.elapsedRealtime()
         speakerSheet = false
+        viewModelScope.launch { playHereIfWaiting() }
     }
 
-    /** Back from opening Spotify: this phone should be one of your Spotify speakers by now. */
+    /** After opening Spotify: wait for this phone to be one of your Spotify speakers, then play there. */
     private suspend fun playHereIfWaiting() {
         val since = awaitingSpotify
         if (since == 0L) return
         awaitingSpotify = 0L
         if (SystemClock.elapsedRealtime() - since > 5 * 60_000L) { pending = null; return }
-        var phone: SpotifyDevice? = null
-        for (attempt in 0 until 5) {   // Spotify takes a moment to tell its servers the phone is here
-            phone = try { Speakers.thisPhone(getApplication(), loadDevices()) } catch (e: IOException) { null }
-            if (phone != null) break
-            delay(1500)
-        }
+        val phone = waitForPhone(20)
         if (phone == null) { message = "Spotify hasn't shown up on this phone yet. Try again in a moment."; speakerSheet = true; return }
         chooseSpeaker(phone)
     }
@@ -676,6 +701,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 private val collator: Collator = Collator.getInstance().apply { strength = Collator.PRIMARY }
 private fun cmp(a: String?, b: String?) = collator.compare(a.orEmpty(), b.orEmpty())
 fun artistKey(s: String) = s.replace(Regex("^the\\s+", RegexOption.IGNORE_CASE), "").trim()
+/** Who an album is by, for sorting and the A-Z rail. A playlist goes by its own name: the shelf
+ *  doesn't show who made it. */
+fun byName(a: Album) = if (a.kind == "playlist") a.title else a.artist
 
 private fun hueKey(hex: String): Double {
     val c = parseColor(hex)
@@ -688,7 +716,7 @@ private fun hueKey(hex: String): Double {
 }
 
 fun arrange(list: List<Album>, sort: Sort): List<Album> {
-    val byArtist = Comparator<Album> { a, b -> cmp(artistKey(a.artist), artistKey(b.artist)).takeIf { it != 0 } ?: cmp(a.year, b.year).takeIf { it != 0 } ?: cmp(a.title, b.title) }
+    val byArtist = Comparator<Album> { a, b -> cmp(artistKey(byName(a)), artistKey(byName(b))).takeIf { it != 0 } ?: cmp(a.year, b.year).takeIf { it != 0 } ?: cmp(a.title, b.title) }
     val c: Comparator<Album> = when (sort) {
         Sort.ARTIST -> byArtist
         Sort.DECADE -> Comparator { a, b -> ((a.year ?: "9999").compareTo(b.year ?: "9999")).takeIf { it != 0 } ?: byArtist.compare(a, b) }
@@ -701,7 +729,7 @@ fun arrange(list: List<Album>, sort: Sort): List<Album> {
 }
 
 fun indexKey(a: Album, sort: Sort): String? = when (sort) {
-    Sort.ARTIST -> artistKey(a.artist).firstOrNull()?.uppercaseChar()?.let { if (it in 'A'..'Z') it.toString() else "#" }
+    Sort.ARTIST -> artistKey(byName(a)).firstOrNull()?.uppercaseChar()?.let { if (it in 'A'..'Z') it.toString() else "#" }
     Sort.TITLE -> a.title.firstOrNull()?.uppercaseChar()?.let { if (it in 'A'..'Z') it.toString() else "#" }
     Sort.DECADE -> a.year?.takeIf { it.length >= 3 }?.let { it.take(3) + "0s" } ?: "Undated"
     else -> null

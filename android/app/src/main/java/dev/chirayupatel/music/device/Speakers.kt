@@ -1,5 +1,7 @@
 package dev.chirayupatel.music.device
 
+import android.app.ActivityOptions
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -8,6 +10,7 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.MediaRouter2
+import android.media.browse.MediaBrowser
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -117,9 +120,31 @@ object Speakers {
     fun spotifyInstalled(ctx: Context): Boolean = ctx.packageManager.getLaunchIntentForPackage(SPOTIFY) != null
 
     /** Open the Spotify app, so this phone shows up as one of your Spotify speakers. */
+    /**
+     * Start Spotify in the background, without a window. Connecting to its media browser (the service
+     * Android Auto and watches use) starts the app, which signs in and shows up as this phone among
+     * your Spotify speakers. Whether Spotify then lets us browse doesn't matter. Returns how to let go.
+     */
+    fun wakeSpotify(ctx: Context): () -> Unit {
+        val svc = runCatching {
+            ctx.packageManager.queryIntentServices(Intent("android.media.browse.MediaBrowserService").setPackage(SPOTIFY), 0)
+        }.getOrNull()?.firstOrNull()?.serviceInfo ?: return {}
+        val browser = runCatching {
+            MediaBrowser(ctx, ComponentName(svc.packageName, svc.name), object : MediaBrowser.ConnectionCallback() {}, null)
+                .also { it.connect() }
+        }.getOrNull() ?: return {}
+        return { runCatching { browser.disconnect() } }
+    }
+
+    /** Open the Spotify app, behind this one where the phone allows it (as Chrome opens background
+     *  tabs), so the phone shows up as one of your Spotify speakers; otherwise in front. */
     fun openSpotify(ctx: Context): Boolean {
         val i = ctx.packageManager.getLaunchIntentForPackage(SPOTIFY) ?: return false
-        return runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val behind = runCatching {
+            ctx.startActivity(Intent(i).addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT), ActivityOptions.makeTaskLaunchBehind().toBundle())
+        }.isSuccess
+        return behind || runCatching { ctx.startActivity(i) }.isSuccess
     }
 
     fun kindOf(spotifyType: String?): Kind = when (spotifyType) {

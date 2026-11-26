@@ -25,6 +25,7 @@ import com.google.common.util.concurrent.ListeningExecutorService
 import com.google.common.util.concurrent.MoreExecutors
 import dev.chirayupatel.music.App
 import dev.chirayupatel.music.ui.MainActivity
+import dev.chirayupatel.music.ui.NowPlayingWidget
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -59,6 +60,15 @@ class PlaybackService : MediaSessionService() {
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { if (shuffleModeEnabled) shuffleFromCurrent(player) }
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED && player.shuffleModeEnabled) shuffleFromCurrent(player)
+            }
+        })
+        // The home-screen widget follows this player: what's playing, and whether it is.
+        player.addListener(object : Player.Listener {
+            override fun onEvents(p: Player, events: Player.Events) {
+                if (!events.containsAny(Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_MEDIA_METADATA_CHANGED)) return
+                val m = p.currentMediaItem?.mediaMetadata ?: return   // emptied for Spotify: the app tells the widget
+                NowPlayingWidget.show(this@PlaybackService, m.title?.toString().orEmpty(), m.artist?.toString().orEmpty(),
+                    p.isPlaying, spotify = false, art = m.artworkUri?.toString())
             }
         })
         val open = PendingIntent.getActivity(
