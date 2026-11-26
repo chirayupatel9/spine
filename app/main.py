@@ -72,6 +72,9 @@ OPEN_PATHS = frozenset({
     "/login", "/healthz", "/manifest.webmanifest", "/.well-known/assetlinks.json",
     "/icon.svg", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png",
 })
+# The app shell: browsers must check for a newer copy on every load, or a deploy can leave a device
+# (the Android app included) running stale CSS or JavaScript against fresh HTML.
+NO_CACHE_PATHS = frozenset({"/style.css", "/app.js", "/sw.js", "/manifest.webmanifest"})
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
@@ -103,6 +106,8 @@ async def gate(request: Request, call_next):
         response = await call_next(request)
     for k, v in SECURITY_HEADERS.items():
         response.headers.setdefault(k, v)
+    if request.url.path in NO_CACHE_PATHS:
+        response.headers.setdefault("Cache-Control", "no-cache")
     return response
 
 

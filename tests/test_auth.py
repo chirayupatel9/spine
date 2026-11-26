@@ -77,6 +77,12 @@ def test_guesses_spread_over_many_addresses_hit_the_total_cap(client, main):
     assert client.post("/login", data={"password": PASSWORD}, follow_redirects=False).status_code == 429
 
 
+def test_app_shell_is_always_revalidated(signed_in):
+    for path in ("/", "/style.css", "/app.js", "/sw.js", "/manifest.webmanifest"):
+        assert signed_in.get(path).headers.get("cache-control") == "no-cache", path
+    assert "no-cache" not in signed_in.get("/icon.svg").headers.get("cache-control", "")
+
+
 def test_security_headers(client):
     h = client.get("/healthz").headers
     assert h["x-content-type-options"] == "nosniff"

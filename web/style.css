@@ -306,13 +306,42 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
   button:active { transform: none; }
 }
 
+/* ------------------------------------------------ touch screens (phones and tablets, any width):
+   every control at least 44px, the size a fingertip can hit reliably */
+@media (pointer: coarse) {
+  button.icon, .device { min-width: 44px; min-height: 44px; }
+  button.ghost, button.primary, .filebtn { min-height: 44px; }
+  .seg button { min-height: 44px; padding: 0 14px; }
+  .search input, .arrange select, .row input, .field select { min-height: 44px; }
+  #index { gap: 2px; }
+  #index button { min-width: 36px; min-height: 40px; }
+  .p-progress::after { inset: -16px 0; }       /* the 3px bar is easy to tap to seek */
+  #aTracks li { padding-top: 13px; padding-bottom: 13px; }
+  .check, .field { min-height: 44px; margin: 4px 0; }
+  .check input { width: 20px; height: 20px; }
+  .close { top: 6px; right: 6px; }
+}
+
 /* ------------------------------------------------ small screens */
 @media (max-width: 860px) {
-  #topbar { flex-wrap: wrap; padding: 12px 16px; gap: 10px; }
-  .grow { display: none; }
-  .search { order: 6; flex-basis: 100%; }
-  .search input { width: 100%; }
-  .arrange > :not(select) { display: none; }
+  /* Top bar in three rows: name and the two buttons; the source switch; search and arrange */
+  #topbar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto 44px 44px; align-items: center;
+    grid-template-areas: "brand brand wall gear" "seg seg seg seg" "search arrange arrange arrange";
+    gap: 8px 4px;
+    padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left));
+  }
+  .brand { grid-area: brand; font-size: 15px; margin: 0 0 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #wallBtn { grid-area: wall; }
+  #settingsBtn { grid-area: gear; }
+  .grow, .arrange-label { display: none; }
+  .seg { grid-area: seg; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(255,255,255,.05); }
+  .seg button { min-height: 40px; padding: 0 4px; border-radius: 9px; font-size: 12px; letter-spacing: .1em; }
+  .seg button.on { background: rgba(255,255,255,.1); }
+  .search { grid-area: search; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; background: rgba(255,255,255,.03); }
+  .search input { width: 100%; min-height: 44px; }
+  .arrange { grid-area: arrange; }
+  .arrange select { min-height: 44px; border-radius: 10px; padding: 0 10px; }
   #player { gap: 10px; padding: 10px 14px; flex-wrap: wrap; }
   .p-meta { flex: 1; width: auto; }
   .p-time { order: 5; flex-basis: 100%; }
