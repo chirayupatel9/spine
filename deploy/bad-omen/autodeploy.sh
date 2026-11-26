@@ -45,6 +45,8 @@ main() {
 
   echo "deploying $what"
   git merge --ff-only --quiet "$new"
+  export VERSION   # the commit, built into the image: /healthz reports it
+  VERSION=$(git rev-parse --short HEAD)
   if docker compose up -d --build --quiet-pull 2>&1 | tail -n 3 && healthy "$health"; then
     rm -f "$state/skip"
     echo "live: $what"
@@ -54,6 +56,7 @@ main() {
   echo "$(git rev-parse --short "$new") isn't healthy; going back to $(git rev-parse --short "$live")" >&2
   echo "$new" > "$state/skip"
   git reset --hard --quiet "$live"
+  VERSION=$(git rev-parse --short HEAD)
   docker compose up -d --build --quiet-pull 2>&1 | tail -n 3 || true
   if healthy "$health"; then echo "back on $(git log -1 --format='%h %s')" >&2; fi
   return 1
