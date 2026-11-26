@@ -14,10 +14,12 @@ It's one small FastAPI server plus a touch-friendly web app. You can install it 
   4. **MusicBrainz + Cover Art Archive**, by album and then by song
 
   Covers are cached in `data/art`. If one is wrong, open the album and use **⋯ → Fix artwork** to search again with corrected names or upload an image.
+- **Everyone has a shelf of their own.** People sign in with Google or Spotify and see their own Spotify albums and playlists, music on their own computer or phone, and the demo shelf, with their own order and hidden albums. The server's music folder stays yours.
 - **Spotify.**
-  - Your saved albums sync onto the shelf.
-  - You can add any album by pasting its link.
+  - Your saved albums and your playlists sync onto the shelf; a **Playlists** tab shows just the playlists.
+  - You can add any album or playlist by pasting its link.
   - You can play on any Spotify device (phone, PC, speaker or TV), or make the screen running Album Viewer the speaker.
+- **Music on your computer.** In Chrome or Edge, **Settings → Music on this computer** reads a folder of music on that computer and puts its albums on your shelf (from their tags, or their folders). Nothing is uploaded: it plays from the disk, and the browser keeps the folder for next time. Other browsers can open a folder for one visit. On Android, the app shows the music on the phone.
 - **Demo shelf.** One click loads 34 well-known albums from the iTunes catalogue, with real covers and 30-second previews that play on the screen. No account is needed, so you can try it before connecting anything. Remove it again in **Settings → Demo shelf**.
 - **The display.**
   - The row sits in a gunmetal bezel on a dark wall, shaped like a 28″ stretched-bar screen. **Settings → Display → Shape** switches between that bar, a wider screen, or filling the window.
@@ -56,7 +58,18 @@ $env:MUSIC_DIR="$HOME\Music"; $env:DATA_DIR="data"; .venv\Scripts\python -m uvic
 Open http://127.0.0.1:8000, sign in, and select **Load demo shelf** to see it working straight away.
 
 ### Signing in
-Sign-in is always on. Set `APP_PASSWORD` to choose the password (use 10 or more characters if the app can be reached from the internet). If you don't set one, a password is generated on the first start: it's printed in the log that one time and saved in `data/password.txt`.
+Sign-in is always on. Each person signs in with **Google** or **Spotify** and gets a shelf of their own. The admin is the Google account named in `ADMIN_EMAIL`: only it sees the server's music folder and manages the library and the demo shelf. On a server from before accounts, the admin also keeps the Spotify connection, hidden albums and manual order that were there.
+
+Setting up Google sign-in (about 5 minutes):
+1. In https://console.cloud.google.com, create a project (for example *Album Viewer*).
+2. Open **Google Auth Platform** (*APIs & Services → OAuth consent screen*). Give the app a name and a support email, choose the **External** audience, and add your domain (for example `yourdomain.com`) under **Branding → Authorized domains**. Album Viewer asks only for `openid`, `email` and `profile`, which need no review by Google.
+3. Under **Audience**, select **Publish app** so anyone with a Google account can sign in. While it says *Testing*, only the test users you list there can.
+4. Under **Clients**, create a client of type **Web application** with the redirect URI `PUBLIC_URL` + `/auth/google/callback`, for example `https://albums.yourdomain.com/auth/google/callback`.
+5. Put its **Client ID** and **Client secret** in `.env` as `GOOGLE_CLIENT_ID=` and `GOOGLE_CLIENT_SECRET=`, and your Google address as `ADMIN_EMAIL=`, then `docker compose up -d`.
+
+Spotify sign-in works for the people you've added to your Spotify app (see [Spotify setup](#spotify-setup-about-10-minutes)). Someone who signed in with Google can connect Spotify in Settings, and then sign in with either.
+
+Once Google sign-in is set up, the password is no longer used. Without it, sign-in needs a password, which signs you in as the admin. Set `APP_PASSWORD` to choose the password (use 10 or more characters if the app can be reached from the internet). If you don't set one, a password is generated on the first start: it's printed in the log that one time and saved in `data/password.txt`.
 
 After 5 wrong passwords from one address, or 50 in total, in 15 minutes, sign-in is refused until the 15 minutes pass. Screens that are already signed in keep working. Behind a reverse proxy or tunnel, set `FORWARDED_ALLOW_IPS` to the proxy's address, or the Docker network it runs on, so the limit sees each visitor's real address. Never set it to `*`: the app would then believe whatever address a visitor writes into the `X-Forwarded-For` header, and the per-address limit would be easy to dodge.
 
@@ -85,10 +98,11 @@ Steps:
      $env:SPOTIFY_CLIENT_ID="paste-client-id"; $env:SPOTIFY_CLIENT_SECRET="paste-client-secret"; $env:PUBLIC_URL="http://127.0.0.1:8000"
      ```
    The log then prints the redirect URI it expects. It must match step 3 exactly.
-8. Open Album Viewer **at the same address as `PUBLIC_URL`** (`http://127.0.0.1:8000`, not `localhost:8000`, or the sign-in can't complete), then **Settings → Connect Spotify**.
+8. Open Album Viewer **at the same address as `PUBLIC_URL`** (`http://127.0.0.1:8000`, not `localhost:8000`, or the sign-in can't complete), then **Settings → Connect Spotify**, or **Continue with Spotify** on the sign-in page.
 
 Notes:
 - If Spotify blocks the saved-albums endpoint for your app, Album Viewer falls back to building albums from your saved songs. You can also add albums by link.
+- Spotify shares a playlist's tracks only with its owner and collaborators. Playlists you just follow still go on the shelf and play, but their track list stays empty.
 - Playing in the browser (Settings → "Use this screen as a Spotify speaker") works in Chrome, Edge, Firefox and Safari, on Android and iOS as well as desktop, according to Spotify. It needs full Premium: Spotify's mobile-only plans are excluded. On iPhone and iPad, playback moved to the page from another device doesn't start until you tap. You can also open the Spotify app on the device, pick it from the 🔈 speaker menu, and use Album Viewer as the remote; that keeps playing if the device puts the browser to sleep.
 
 ## Hosting it
@@ -170,12 +184,13 @@ Every `/api/` call needs the sign-in cookie (`POST /login` with `password`).
 
 | Method | Path | |
 |---|---|---|
-| GET | `/api/albums` | shelf (`?source=local|spotify|demo&include_hidden=true`) |
+| GET | `/api/me` | who is signed in |
+| GET | `/api/albums` | your shelf (`?source=local|spotify|demo|playlist&include_hidden=true`) |
 | GET | `/api/albums/{id}` | album + tracks |
 | PATCH | `/api/albums/{id}` | `{"hidden": true}` |
 | POST | `/api/albums/{id}/art` | upload a cover (multipart `file`, `MAX_UPLOAD_MB` max) |
 | POST | `/api/albums/{id}/art/search` | `{"artist","album","song"}` online lookup |
-| PUT | `/api/order` | manual shelf order (`{"ids": [...]}`) |
+| GET / PUT | `/api/order` | your manual shelf order (`{"ids": [...]}`) |
 | POST | `/api/demo/load` | load the demo shelf (`DELETE /api/demo` removes it) |
 | POST | `/api/library/rescan` | rescan the folder (`?force_art=true` to re-find artwork) |
 | GET | `/api/local/stream/{track_id}` | audio stream (supports Range) |

@@ -40,6 +40,60 @@ CREATE TABLE IF NOT EXISTS tracks (
 );
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+
+-- people, and what is theirs
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT UNIQUE,          -- Google's id for them, once they sign in with Google
+    spotify_id TEXT UNIQUE,          -- their Spotify user id, once they sign in with or connect Spotify
+    email TEXT,
+    name TEXT,
+    picture TEXT,
+    admin INTEGER DEFAULT 0,         -- runs the server: sees the music folder, manages library and demo
+    created_at REAL,
+    seen_at REAL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,          -- SHA-256 of the cookie
+    user_id INTEGER NOT NULL,
+    created_at REAL,
+    seen_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS spotify_auth (
+    user_id INTEGER PRIMARY KEY,
+    access_token TEXT,
+    refresh_token TEXT,
+    expires_at REAL
+);
+CREATE TABLE IF NOT EXISTS shelf (   -- the Spotify albums and playlists on each person's shelf
+    user_id INTEGER NOT NULL,
+    album_id TEXT NOT NULL,
+    added_at REAL,
+    pinned INTEGER DEFAULT 0,        -- added by link: kept through syncs
+    seen INTEGER DEFAULT 1,
+    PRIMARY KEY (user_id, album_id)
+);
+CREATE INDEX IF NOT EXISTS idx_shelf_album ON shelf(album_id);
+CREATE TABLE IF NOT EXISTS hidden (  -- albums each person has hidden
+    user_id INTEGER NOT NULL,
+    album_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, album_id)
+);
+CREATE TABLE IF NOT EXISTS oauth_flows (   -- a sign-in in progress with Google or Spotify
+    state TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    verifier TEXT,                   -- PKCE secret (Google)
+    user_id INTEGER,                 -- connecting Spotify to this account, rather than signing in
+    app_challenge TEXT,              -- started by the Android app: hand the sign-in back to it
+    expires_at REAL
+);
+CREATE TABLE IF NOT EXISTS app_codes (     -- one-time codes passing a sign-in to the Android app
+    code TEXT PRIMARY KEY,           -- SHA-256 of the code
+    user_id INTEGER NOT NULL,
+    challenge TEXT NOT NULL,
+    expires_at REAL
+);
 """
 
 
@@ -52,6 +106,18 @@ def _connect() -> sqlite3.Connection:
 
 _conn = _connect()
 _conn.executescript(SCHEMA)
+
+
+def _migrate() -> None:
+    cols = {r[1] for r in _conn.execute("PRAGMA table_info(albums)")}
+    for name, ddl in (("kind", "TEXT DEFAULT 'album'"),   # 'album' | 'playlist'
+                      ("track_count", "INTEGER"),          # playlists: Spotify's count (their tracks load on demand)
+                      ("snapshot", "TEXT")):               # playlists: Spotify's version of its contents
+        if name not in cols:
+            _conn.execute(f"ALTER TABLE albums ADD COLUMN {name} {ddl}")
+
+
+_migrate()
 _conn.commit()
 
 

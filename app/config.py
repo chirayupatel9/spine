@@ -22,6 +22,15 @@ DB_PATH = DATA_DIR / "albumviewer.db"
 # Public base URL the browser uses, e.g. https://albums.example.com or http://127.0.0.1:8000
 PUBLIC_URL = _env("PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/")
 
+# Sign in with Google: a Web application OAuth client from console.cloud.google.com, with
+# {PUBLIC_URL}/auth/google/callback as its redirect URI. Once set, Google (and Spotify) sign-in
+# replace the password. ADMIN_EMAIL is the Google account that runs the server.
+GOOGLE_CLIENT_ID = _env("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = _env("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = f"{PUBLIC_URL}/auth/google/callback"
+ADMIN_EMAIL = _env("ADMIN_EMAIL").lower()
+PASSWORD_SIGN_IN = not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+
 SPOTIFY_CLIENT_ID = _env("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = _env("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_REDIRECT_URI = f"{PUBLIC_URL}/auth/spotify/callback"

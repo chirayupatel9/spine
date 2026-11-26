@@ -58,17 +58,22 @@ def test_demo_shelf_loads_and_removes(signed_in, monkeypatch):
 
 def test_spotify_needs_keys_before_sign_in(signed_in):
     r = signed_in.get("/auth/spotify/login", follow_redirects=False)
-    assert r.status_code == 400 and "SPOTIFY_CLIENT_ID" in r.json()["detail"]
+    assert r.status_code == 303 and r.headers["location"].startswith("/login?error=Spotify")
 
 
 def test_spotify_callback_checks_state(signed_in):
     r = signed_in.get("/auth/spotify/callback?code=abc&state=forged", follow_redirects=False)
-    assert r.status_code == 400
+    assert r.status_code == 303 and r.headers["location"].startswith("/login?error=")
 
 
-def test_spotify_error_is_passed_back_safely(signed_in):
-    r = signed_in.get("/auth/spotify/callback?error=access_denied%26x%3D1", follow_redirects=False)
-    assert r.headers["location"] == "/?spotify_error=access_denied%26x%3D1"
+def test_spotify_error_is_passed_back_safely(signed_in, monkeypatch):
+    from urllib.parse import parse_qs, quote, urlparse
+    from app import spotify
+    monkeypatch.setattr(spotify, "configured", lambda: True)
+    start = signed_in.get("/auth/spotify/login", follow_redirects=False)       # signed in: connecting
+    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    r = signed_in.get(f"/auth/spotify/callback?error=access_denied%26x%3D1&state={state}", follow_redirects=False)
+    assert r.headers["location"] == "/?spotify_error=" + quote("Spotify: access_denied&x=1")
 
 
 def test_status(signed_in):
@@ -81,7 +86,7 @@ def test_spotify_player_controls(signed_in, monkeypatch):
     """Seek, shuffle and repeat go to Spotify's player API; bad values are refused before that."""
     from app import spotify
     calls = []
-    monkeypatch.setattr(spotify, "api", lambda method, path, **kw: calls.append((method, path, kw.get("params"))))
+    monkeypatch.setattr(spotify, "api", lambda uid, method, path, **kw: calls.append((method, path, kw.get("params"))))
     for action, value in (("pause", None), ("seek", 61500.7), ("shuffle", True), ("repeat", "track")):
         assert signed_in.post("/api/spotify/control", json={"action": action, "value": value}).status_code == 200
     assert calls == [("PUT", "/me/player/pause", {}), ("PUT", "/me/player/seek", {"position_ms": 61500}),

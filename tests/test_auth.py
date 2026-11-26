@@ -54,7 +54,15 @@ def test_sign_in_and_out(client):
 
 
 def test_forged_cookie_is_rejected(client):
-    client.cookies.set("av_auth", "0" * 64)
+    client.cookies.set("av_session", "0" * 43)
+    assert client.get("/api/albums").status_code == 401
+
+
+def test_signing_out_ends_the_session_on_the_server(client):
+    client.post("/login", data={"password": PASSWORD}, follow_redirects=False)
+    token = client.cookies.get("av_session")
+    client.post("/logout", follow_redirects=False)
+    client.cookies.set("av_session", token)        # a copy of the cookie kept from before
     assert client.get("/api/albums").status_code == 401
 
 

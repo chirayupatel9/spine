@@ -141,6 +141,8 @@ body.wallmode.peek #topbar { transform: none; opacity: 1; }
   transition: opacity 220ms var(--ease-out) 140ms;
 }
 body.notext .spine .lbl, body.notext .spine .mark { visibility: hidden; }
+/* playlists carry a dot where albums have their label's rule */
+.spine.playlist .mark { left: 50%; right: auto; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; opacity: .45; }
 .spine.hiddenalb { opacity: .35; }
 .spine.tiny .lbl, .spine.tiny .mark { display: none; }
 
@@ -314,6 +316,12 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
 #aTracks li.now .n { color: inherit; }
 #aTracks .tt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #aTracks .d { color: var(--faint); font-variant-numeric: tabular-nums; }
+#aTracks li.note { cursor: default; color: var(--muted); line-height: 1.45; display: block; }
+.account { display: flex; align-items: center; gap: 12px; }
+.account img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; background: var(--field); flex: none; }
+.account img:not([src]), .account img[src=""] { display: none; }
+.account .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.account .who b, .account .who span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .panel {
   position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 24px 26px;
@@ -491,6 +499,7 @@ body.vertical .spine .mark { /* a thin rule, not a box: a box at the end of a ro
   border: 0; border-radius: 1px; background: currentColor; opacity: .3;
 }
 body.vertical .spine.band::before { right: auto; bottom: 0; height: auto; width: calc(var(--screen-h) * .04); }
+body.vertical .spine.playlist .mark { left: auto; top: 50%; bottom: auto; width: 6px; height: 6px; margin: -3px 0 0; border-radius: 50%; opacity: .45; }
 body.vertical { --out: 1.42; }   /* the record comes out downwards, a little less: the stack stays in view */
 body.vertical .spine.open.out { width: 100%; height: calc(var(--screen-h) * var(--out)); }
 body.vertical .spine.open.out .cover { width: 100%; height: var(--screen-h); box-shadow: 0 10px 24px rgba(0,0,0,.45); }
@@ -560,7 +569,7 @@ body.vertical.wallmode #screen { border-radius: 0; }
   #settingsBtn { grid-area: gear; }
   .grow, .arrange-label { display: none; }
   .seg { grid-area: seg; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(255,255,255,.05); }
-  .seg button { min-height: 40px; padding: 0 4px; border-radius: 9px; font-size: 12px; letter-spacing: .1em; }
+  .seg button { min-height: 40px; padding: 0 2px; border-radius: 9px; font-size: 11.5px; letter-spacing: .06em; overflow: hidden; text-overflow: ellipsis; }
   .seg button.on { background: rgba(255,255,255,.1); }
   .search { grid-area: search; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; background: rgba(255,255,255,.03); }
   .search input { width: 100%; min-height: 44px; }

@@ -39,6 +39,7 @@
     <nav class="seg" id="sourceSeg" aria-label="Source">
       <button data-source="all" class="on">All</button>
       <button data-source="spotify">Spotify</button>
+      <button data-source="playlist" hidden>Playlists</button>
       <button data-source="local">Local</button>
       <button data-source="demo" hidden>Demo</button>
     </nav>
@@ -65,9 +66,11 @@
         <div id="row" role="list" aria-label="Albums"></div>
         <div id="empty" hidden>
           <h2>Your collection, back on the wall.</h2>
-          <p>Load the demo shelf, connect Spotify, or point Album Viewer at a music folder.</p>
+          <p id="emptyText">Connect Spotify to see your albums and playlists here.</p>
           <div class="row center">
-            <button class="primary" id="demoLoadBtn">Load demo shelf</button>
+            <button class="primary" id="emptySpotify" hidden>Connect Spotify</button>
+            <button class="ghost" id="emptyFolder" hidden>Open a music folder</button>
+            <button class="primary" id="demoLoadBtn" hidden>Load demo shelf</button>
             <button class="ghost" onclick="openSettings()">Settings</button>
           </div>
         </div>
@@ -172,18 +175,31 @@
       <h2>Settings</h2>
 
       <section>
+        <h3>Account</h3>
+        <div class="account"><img id="meAvatar" alt=""><div class="who"><b id="meName"></b><span class="hint" id="meDetail"></span></div>
+          <form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div>
+      </section>
+
+      <section>
         <h3>Spotify</h3>
         <div id="spStatus" class="hint"></div>
         <div class="row" id="spButtons"></div>
         <div id="spAdd" class="row" hidden>
-          <input id="spLink" placeholder="Add album by Spotify link">
+          <input id="spLink" placeholder="Add an album or playlist by its Spotify link">
           <button class="ghost" id="spAddBtn">Add</button>
         </div>
         <label class="check" id="sdkRow" hidden><input type="checkbox" id="sdkToggle"> Use this screen as a Spotify speaker</label>
       </section>
 
-      <section>
-        <h3>Local library</h3>
+      <section id="devSec">
+        <h3>Music on this computer</h3>
+        <div id="devStatus" class="hint"></div>
+        <div class="row" id="devButtons"></div>
+        <input type="file" id="devFiles" multiple accept="audio/*,image/*" hidden>
+      </section>
+
+      <section id="libSec" hidden>
+        <h3>Music folder on the server</h3>
         <div id="libStatus" class="hint"></div>
         <div class="row">
           <button class="ghost" id="rescanBtn">Rescan folder</button>
@@ -191,7 +207,7 @@
         </div>
       </section>
 
-      <section>
+      <section id="demoSec" hidden>
         <h3>Demo shelf</h3>
         <div id="demoStatus" class="hint"></div>
         <div class="row" id="demoButtons"></div>
@@ -211,10 +227,6 @@
         <label class="check"><input type="checkbox" id="glowToggle" checked> Glow the wall in the playing album's colour</label>
       </section>
 
-      <section>
-        <h3>This screen</h3>
-        <form method="post" action="/logout" class="row"><button class="ghost" type="submit">Sign out</button></form>
-      </section>
     </div>
   </div>
 

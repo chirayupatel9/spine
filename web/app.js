@@ -155,9 +155,11 @@ const SORTS = {
   manual: (a, b) => (a.pos ?? 1e9) - (b.pos ?? 1e9) || SORTS.artist(a, b),
 };
 
+const inSource = a => S.source === "all" || (S.source === "playlist" ? a.kind === "playlist" :
+  S.source === "local" ? a.source === "local" || a.source === "device" : a.source === S.source);
 function visibleAlbums() {
   const q = S.search.trim().toLowerCase();
-  return S.albums.filter(a => (S.source === "all" || a.source === S.source) &&
+  return S.albums.filter(a => inSource(a) &&
     (!q || a.title.toLowerCase().includes(q) || a.artist.toLowerCase().includes(q))).sort(SORTS[S.sort]);
 }
 
@@ -213,7 +215,7 @@ function makeSpine(a) {
   const w = spineWidth(a), h = hash(a.id + a.title);
   const el = document.createElement("button");
   el.className = "spine" + (h % 3 === 0 ? " band" : "") + (h % 5 === 1 ? " serif" : "") +
-    (a.hidden ? " hiddenalb" : "") + (w < 13 ? " tiny" : "");
+    (a.hidden ? " hiddenalb" : "") + (w < 13 ? " tiny" : "") + (a.kind === "playlist" ? " playlist" : "");
   const fs = S.vertical ? clamp(w * 0.42, 9, 15) : clamp(w * 0.37, 7, 13);   // text runs along the spine
   el.style.cssText = `--w:${w}px;--c:${a.color};--t:${a.text_color};--fs:${fs.toFixed(1)}px`;
   el.dataset.id = a.id;
@@ -545,13 +547,16 @@ const dataCache = {
 };
 
 function applyAlbums(list, animateNew) {
+  S.serverAlbums = list;
+  list = list.concat(Device.shelf());
   if (animateNew) S.fresh = new Set(list.filter(a => !S.byId.has(a.id)).map(a => a.id));
   S.albums = list;
   S.byId = new Map(list.map(a => [a.id, a]));
   S.loaded = true;
-  const hasDemo = list.some(a => a.source === "demo");
+  const hasDemo = list.some(a => a.source === "demo"), hasLists = list.some(a => a.kind === "playlist");
   $('#sourceSeg [data-source="demo"]').hidden = !hasDemo;
-  if (S.source === "demo" && !hasDemo) setSource("all");
+  $('#sourceSeg [data-source="playlist"]').hidden = !hasLists;
+  if ((S.source === "demo" && !hasDemo) || (S.source === "playlist" && !hasLists)) setSource("all");
   render();
 }
 
@@ -570,6 +575,11 @@ async function loadAlbums() {
 }
 
 async function detail(id, fresh = false) {
+  if (id.startsWith("dev_")) {
+    const d = Device.detail(id);
+    if (!d) throw new Error("That album isn't in your music folder any more");
+    return d;
+  }
   if (!fresh && S.details.has(id)) return S.details.get(id);
   const a = await api(`/api/albums/${encodeURIComponent(id)}`);
   S.details.set(id, a);
@@ -813,6 +823,7 @@ async function saveOrder() {
   const ids = full.map(id => (shownSet.has(id) ? shown[k++] : id));
   ids.forEach((id, i) => { const a = S.byId.get(id); if (a) a.pos = i; });
   S.list = shown.map(id => S.byId.get(id));
+  S.orderIds = ids;
   renderIndex();
   try { await api("/api/order", { method: "PUT", body: { ids } }); }
   catch (err) { toast("Couldn't save the order: " + err.message); }
@@ -865,9 +876,10 @@ async function openSheet(id, fromEl) {
   $("#aCover").src = a.art || "";
   $("#aCover").style.background = a.color;
   $("#aTitle").textContent = a.title;
-  $("#aArtist").textContent = a.artist + (a.year ? ` · ${a.year}` : "");
-  $("#aSource").textContent = { spotify: "Spotify", demo: "Demo shelf · 30-second previews" }[a.source] ||
-    "Local library" + (a.art_status === "missing" ? " · no cover found" : "");
+  $("#aArtist").textContent = a.kind === "playlist" ? `By ${a.artist}` : a.artist + (a.year ? ` · ${a.year}` : "");
+  $("#aSource").textContent = a.kind === "playlist" ? "Spotify playlist" :
+    { spotify: "Spotify", demo: "Demo shelf · 30-second previews", device: "On this computer" }[a.source] ||
+    "Music folder" + (a.art_status === "missing" ? " · no cover found" : "");
   $("#aHide").textContent = a.hidden ? "Show on shelf" : "Hide from shelf";
   $("#aFixArt").hidden = a.source !== "local";
   $("#aMenu").hidden = true; $("#artForm").hidden = true;
@@ -910,6 +922,10 @@ function renderSheetState() {
   $("#aPlay").innerHTML = icon(playing ? "pause" : "play") + `<span>${playing ? "Pause" : mine ? "Resume" : "Play"}</span>`;
   $("#aPutBack").hidden = S.openId !== a.id;
   const multiDisc = new Set(a.track_list.map(t => t.disc_no || 1)).size > 1;
+  if (a.kind === "playlist" && a.tracks_shared === false) {
+    $("#aTracks").innerHTML = `<li class="note">Spotify shares the tracks of a playlist only with its owner and collaborators. Press Play to hear it.</li>`;
+    return;
+  }
   $("#aTracks").innerHTML = a.track_list.map((t, i) =>
     `<li data-i="${i}" class="${Player.isTrack(t.id) ? "now" : ""}"><span class="n">${multiDisc ? (t.disc_no || 1) + "." : ""}${t.track_no || i + 1}</span>` +
     `<span class="tt">${esc(t.title)}${t.artist && t.artist !== a.artist ? ` <span style="color:var(--muted)">· ${esc(t.artist)}</span>` : ""}</span>` +
@@ -917,7 +933,7 @@ function renderSheetState() {
 }
 
 $("#aTracks").addEventListener("click", e => {
-  const li = e.target.closest("li"); if (!li) return;
+  const li = e.target.closest("li[data-i]"); if (!li) return;
   setOpen(S.sheet.id);
   Player.playAlbum(S.sheet, +li.dataset.i).then(renderSheetState);
 });
@@ -939,10 +955,17 @@ $("#aPutBack").onclick = () => {
 };
 $("#aMore").onclick = () => ($("#aMenu").hidden = !$("#aMenu").hidden);
 $("#aHide").onclick = async () => {
-  await api(`/api/albums/${encodeURIComponent(S.sheet.id)}`, { method: "PATCH", body: { hidden: !S.sheet.hidden } });
-  S.details.delete(S.sheet.id);
-  if (S.openId === S.sheet.id && !S.sheet.hidden) setOpen(null);
-  closeSheets(); loadAlbums();
+  const a = S.sheet;
+  await api(`/api/albums/${encodeURIComponent(a.id)}`, { method: "PATCH", body: { hidden: !a.hidden } });
+  S.details.delete(a.id);
+  if (S.openId === a.id && !a.hidden) setOpen(null);
+  closeSheets();
+  if (a.source === "device") {   // the server keeps only the fact that it's hidden
+    const h = new Set(S.me?.device_hidden || []);
+    if (a.hidden) h.delete(a.id); else h.add(a.id);
+    if (S.me) S.me.device_hidden = [...h];
+    applyAlbums(S.serverAlbums || [], false);
+  } else loadAlbums();
 };
 $("#aFixArt").onclick = () => {
   const f = $("#artForm"); f.hidden = false; $("#aMenu").hidden = true;
@@ -1001,7 +1024,8 @@ const Player = {
   /* `index` is the track to start on. Leave it out to play the album from the top, or from a
      random track when shuffle is on. */
   async playAlbum(album, index = null, shuffle = false) {
-    if (!album.track_list?.length) { toast("This album has no playable tracks"); return; }
+    // a Spotify playlist whose tracks Spotify won't list still plays
+    if (!album.track_list?.length && album.source !== "spotify") { toast("This album has no playable tracks"); return; }
     if (album.source === "spotify") return this.playSpotify(album, index ?? 0, shuffle);
     if (this.mode === "spotify" && this.sp?.is_playing) api("/api/spotify/control", { method: "POST", body: { action: "pause" } }).catch(() => {});
     this.stopPolling();
@@ -1021,10 +1045,19 @@ const Player = {
 
   load(autoplay) {
     const t = this.queue[this.index]; if (!t) return;
-    audio.src = this.album.source === "demo" ? t.uri : `/api/local/stream/${encodeURIComponent(t.id)}`;
     audio.loop = this.repeat === "one";
-    if (autoplay) audio.play().catch(err => { if (err.name !== "AbortError") toast("Tap play to start (" + err.message + ")"); });
-    const device = this.album.source === "demo" ? "This screen · preview" : "This screen";
+    const start = () => { if (autoplay) audio.play().catch(err => { if (err.name !== "AbortError") toast("Tap play to start (" + err.message + ")"); }); };
+    if (this.album.source === "device") {   // read from this computer's disk as it plays
+      Device.url(t).then(url => {
+        if (this.queue[this.index] !== t) return URL.revokeObjectURL(url);
+        if (this._fileUrl) URL.revokeObjectURL(this._fileUrl);
+        this._fileUrl = url; audio.src = url; start();
+      }).catch(err => toast(err.message));
+    } else {
+      audio.src = this.album.source === "demo" ? t.uri : `/api/local/stream/${encodeURIComponent(t.id)}`;
+      start();
+    }
+    const device = this.album.source === "demo" ? "This screen · preview" : this.album.source === "device" ? "This computer" : "This screen";
     this.ui({ title: t.title, artist: t.artist || this.album.artist, art: this.album.art, playing: true, device, pos: 0, dur: t.duration });
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist || this.album.artist, album: this.album.title,
@@ -1038,7 +1071,7 @@ const Player = {
     this.mode = "spotify"; this.album = album;
     const device_id = await Sdk.deviceForPlay();
     let offset = index;
-    if (shuffle) offset = Math.floor(Math.random() * Math.max(1, album.track_list.length));
+    if (shuffle) offset = Math.floor(Math.random() * Math.max(1, album.track_list.length || album.tracks || 1));
     try {
       await api("/api/spotify/play", { method: "POST", body: { uri: album.uri, offset, device_id } });
       this.sp = { ...(this.sp || {}), album_id: album.id, is_playing: true, progress_ms: 0 };
@@ -1465,8 +1498,155 @@ $("#devRefresh").onclick = () => openDevices();
 
 /* ======================================================== settings + status */
 
+/* who is signed in: their name and picture, and whether they run this server */
+function renderAccount() {
+  const me = S.me;
+  if (!me) return;
+  $("#meName").textContent = me.name || me.email || "Signed in";
+  $("#meDetail").textContent = [me.email, me.google ? "Google" : me.spotify_id ? "Spotify" : "", me.admin ? "runs this server" : ""]
+    .filter(Boolean).join(" · ");
+  if (me.picture) $("#meAvatar").src = me.picture; else $("#meAvatar").removeAttribute("src");
+}
+
+function renderEmpty() {
+  const admin = S.me?.admin, sp = S.status?.spotify;
+  $("#emptyText").textContent = admin
+    ? "Load the demo shelf, connect Spotify, or add music to the server's music folder."
+    : "Connect Spotify to see your albums and playlists here" + (sp && !sp.configured ? " (once the owner sets Spotify up)." : ".");
+  $("#demoLoadBtn").hidden = !admin;
+  $("#emptySpotify").hidden = !sp?.configured || sp.connected;
+  $("#emptyFolder").hidden = S.vertical;   // on a phone, the Android app plays the phone's own music
+}
+$("#emptySpotify").onclick = () => (location.href = "/auth/spotify/login");
+$("#emptyFolder").onclick = () => Device.choose();
+
+/* ======================================================== music on this computer
+   Albums from a folder on this computer, read in the browser by device.js (Chrome and Edge keep the
+   folder between visits; other browsers open files for one visit). Nothing is uploaded: the server
+   only keeps which of them are hidden and their place in the manual order. */
+
+const Device = {
+  mod: null, albums: [], details: new Map(), folder: null, permission: null, scanning: null, artUrls: [],
+  lib() { return (this.mod ??= import("/device.js")); },
+  keeps() { return typeof window.showDirectoryPicker === "function"; },
+  /* its albums as they go on the shelf: hidden ones left off (unless shown), with their manual places */
+  shelf() {
+    const hidden = new Set(S.me?.device_hidden || []), showHidden = store.get("showHidden", false);
+    const pos = new Map((S.orderIds || []).map((id, i) => [id, i]));
+    return this.albums.map(a => ({ ...a, hidden: hidden.has(a.id), pos: pos.get(a.id) })).filter(a => showHidden || !a.hidden);
+  },
+  detail(id) {
+    const a = this.albums.find(x => x.id === id);
+    return a && { ...a, track_list: this.details.get(id) || [] };
+  },
+  apply(index, folder) {
+    this.artUrls.forEach(u => URL.revokeObjectURL(u));
+    this.artUrls = [];
+    this.albums = (index?.albums || []).map(({ artBlob, ...a }) => {
+      const art = artBlob ? URL.createObjectURL(artBlob) : null;
+      if (art) this.artUrls.push(art);
+      return { ...a, art };
+    });
+    this.details = new Map(Object.entries(index?.details || {}));
+    this.folder = folder ?? index?.folder ?? null;
+    S.fresh = null;
+    applyAlbums(S.serverAlbums || [], true);
+    renderDevice();
+  },
+  progress(done, total) {
+    this.scanning = { done, total };
+    const t = $("#scanToast");
+    t.textContent = `Reading your music folder… ${done} of ${total} tracks`;
+    reveal(t, true);
+    renderDevice();
+  },
+  async run(job) {
+    try { this.scanning = { done: 0, total: 0 }; renderDevice(); await job(); }
+    catch (err) { if (err.name !== "AbortError") toast(err.message); }
+    finally { this.scanning = null; reveal($("#scanToast"), false); renderDevice(); }
+  },
+  async restore() {
+    if (!this.keeps()) return;
+    const m = await this.lib(), r = await m.restore();
+    if (!r) return;
+    this.permission = r.permission;
+    this.apply(r, r.folder);
+    // Refresh a scan more than a day old, if the browser still lets us read the folder.
+    if (r.permission === "granted" && Date.now() - (r.scannedAt || 0) > 24 * 3600e3) this.rescan(false);
+  },
+  choose() {
+    if (!this.keeps()) return $("#devFiles").click();
+    return this.run(async () => {
+      const m = await this.lib();
+      const index = await m.chooseFolder((d, n) => this.progress(d, n));
+      this.permission = "granted";
+      this.apply(index);
+      toast(`${index.albums.length} albums from “${index.folder}”`);
+    });
+  },
+  rescan(interactive = true) {
+    return this.run(async () => {
+      const m = await this.lib();
+      if (this.permission !== "granted") {
+        if (!interactive || !(await m.reconnect())) return;
+        this.permission = "granted";
+      }
+      this.apply(await m.scanFolder((d, n) => this.progress(d, n)));
+    });
+  },
+  async forget() {
+    if (!confirm("Take this computer's music off the shelf? The files stay where they are.")) return;
+    if (Player.album?.source === "device") Player.stop();
+    await (await this.lib()).forget();
+    this.permission = null;
+    this.apply(null, null);
+  },
+  openFiles(files) {
+    return this.run(async () => {
+      const index = await (await this.lib()).openFiles(files, (d, n) => this.progress(d, n));
+      this.permission = "granted";
+      this.apply(index, `${files.length} files`);
+    });
+  },
+  async url(track) {
+    const m = await this.lib();
+    if (this.permission === "prompt") {   // the browser forgot: asking needs this click
+      if (!(await m.reconnect())) throw new Error("Album Viewer needs your permission to read the music folder");
+      this.permission = "granted";
+    }
+    return m.trackUrl(track);
+  },
+};
+$("#devFiles").onchange = e => { if (e.target.files.length) Device.openFiles([...e.target.files]); e.target.value = ""; };
+if ("webkitdirectory" in document.createElement("input")) $("#devFiles").setAttribute("webkitdirectory", "");
+
+function renderDevice() {
+  const st = $("#devStatus"), btns = $("#devButtons");
+  if (!st) return;
+  const n = Device.albums.length, sc = Device.scanning;
+  btns.innerHTML = "";
+  const add = (label, fn, primary) => {
+    const b = document.createElement("button");
+    b.className = primary ? "primary" : "ghost"; b.textContent = label; b.onclick = fn; b.disabled = !!sc;
+    btns.appendChild(b);
+  };
+  if (sc) st.textContent = sc.total ? `Reading… ${sc.done} of ${sc.total} tracks` : "Looking through the folder…";
+  else if (Device.folder) st.textContent = `${n} album${n === 1 ? "" : "s"} from “${Device.folder}”` +
+    (Device.permission === "prompt" ? ". Your browser will ask again before it plays them." : ". Nothing is uploaded.");
+  else st.textContent = Device.keeps()
+    ? "Play the music in a folder on this computer. Nothing is uploaded; your browser keeps the folder for next time."
+    : "Open a music folder to play it here. This browser can't keep it for next time, so open it again on your next visit.";
+  if (Device.folder && Device.keeps()) {
+    add("Rescan", () => Device.rescan());
+    add("Choose another folder", () => Device.choose());
+    add("Forget", () => Device.forget());
+  } else add(Device.keeps() ? "Choose a folder" : "Open a folder", () => Device.choose(), true);
+}
+
 function openSettings() {
   reveal($("#settingsSheet"), true);
+  renderAccount();
+  renderDevice();
   $("#showHidden").checked = store.get("showHidden", false);
   $("#spineNames").checked = store.get("spineNames", true);
   $("#glowToggle").checked = store.get("glow", true);
@@ -1477,22 +1657,27 @@ function openSettings() {
 window.openSettings = openSettings;
 
 function renderStatus(st) {
-  const sp = st.spotify, lib = st.library, demo = st.demo;
+  const sp = st.spotify, lib = st.library || {}, demo = st.demo;
   const spBtns = $("#spButtons"); spBtns.innerHTML = "";
   $("#spAdd").hidden = !sp.connected; $("#sdkRow").hidden = !sp.connected;
   if (!sp.configured) {
-    $("#spStatus").innerHTML = `Not configured. Create an app at developer.spotify.com, add the redirect URI <code>${esc(sp.redirect_uri)}</code>, then set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET and restart.`;
+    $("#spStatus").innerHTML = st.admin
+      ? `Not set up. Create an app at developer.spotify.com, add the redirect URI <code>${esc(sp.redirect_uri)}</code>, then set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET and restart.`
+      : "Spotify isn't set up on this server yet.";
   } else if (!sp.connected) {
-    $("#spStatus").textContent = "Not connected.";
+    $("#spStatus").textContent = "Not connected. Your saved albums and playlists come onto your shelf.";
     spBtns.innerHTML = `<button class="primary" onclick="location.href='/auth/spotify/login'">Connect Spotify</button>`;
   } else {
-    $("#spStatus").textContent = sp.syncing ? `Syncing… ${sp.albums} albums` :
-      `Connected · ${S.albums.filter(a => a.source === "spotify").length} albums` + (sp.error ? ` · last sync error: ${sp.error}` : "");
-    spBtns.innerHTML = `<button class="ghost" id="spSync">Sync saved albums</button><button class="ghost" id="spOff">Disconnect</button>`;
+    const mine = S.albums.filter(a => a.source === "spotify"), lists = mine.filter(a => a.kind === "playlist").length;
+    $("#spStatus").textContent = sp.syncing ? `Syncing… ${sp.albums} albums and playlists` :
+      `Connected · ${mine.length - lists} albums · ${lists} playlists` + (sp.error ? ` · last sync error: ${sp.error}` : "");
+    spBtns.innerHTML = `<button class="ghost" id="spSync">Sync again</button><button class="ghost" id="spOff">Disconnect</button>`;
     $("#spSync").onclick = () => api("/api/spotify/sync", { method: "POST" }).then(watchStatus);
-    $("#spOff").onclick = async () => { if (confirm("Disconnect Spotify and remove its albums from the shelf?")) { await api("/api/spotify/disconnect", { method: "POST" }); loadAlbums(); refreshStatus(); } };
+    $("#spOff").onclick = async () => { if (confirm("Disconnect Spotify and take its albums and playlists off your shelf?")) { await api("/api/spotify/disconnect", { method: "POST" }); loadAlbums(); refreshStatus(); } };
   }
-  $("#libStatus").textContent = lib.error ? lib.error :
+  // The server's music folder and the demo shelf are looked after by whoever runs the server.
+  $("#libSec").hidden = !st.admin; $("#demoSec").hidden = !st.admin;
+  if (st.admin) $("#libStatus").textContent = lib.error ? lib.error :
     lib.scanning ? `${lib.phase}… ${lib.phase === "finding artwork" ? `${lib.art_done}/${lib.art_total}` : `${lib.files} files`}` :
     `${lib.albums} albums from ${lib.files} files in ${st.music_dir}` + (lib.last_scan ? ` · scanned ${new Date(lib.last_scan * 1000).toLocaleString()}` : "");
 
@@ -1521,7 +1706,7 @@ function renderStatus(st) {
 }
 
 async function refreshStatus() {
-  try { S.status = await api("/api/status"); renderStatus(S.status); return S.status; } catch { return null; }
+  try { S.status = await api("/api/status"); renderStatus(S.status); renderEmpty(); return S.status; } catch { return null; }
 }
 
 let watchT = null;
@@ -1530,7 +1715,7 @@ function watchStatus() {
   let wasBusy = true, ticks = 0;
   watchT = setInterval(async () => {
     const st = await refreshStatus(); if (!st) return;
-    const busy = st.library.scanning || st.spotify.syncing || st.demo.loading;
+    const busy = st.library?.scanning || st.spotify.syncing || st.demo.loading;
     if (++ticks % 3 === 0 && busy) loadAlbums();   // show progress on the shelf while loading
     if (!busy && wasBusy) { clearInterval(watchT); watchT = null; loadAlbums(); }
     wasBusy = busy;
@@ -1553,7 +1738,7 @@ $("#spAddBtn").onclick = async () => {
   catch (e) { toast(e.message); }
 };
 $("#sdkToggle").onchange = e => { store.set("sdk", e.target.checked); if (e.target.checked) Sdk.load(); else store.set("device", null); };
-$("#showHidden").onchange = e => { store.set("showHidden", e.target.checked); loadAlbums(); };
+$("#showHidden").onchange = e => { store.set("showHidden", e.target.checked); loadAlbums().then(() => applyAlbums(S.serverAlbums || [], false)); };
 $("#spineNames").onchange = e => { store.set("spineNames", e.target.checked); render(); };
 $("#glowToggle").onchange = e => { store.set("glow", e.target.checked); setGlow(); };
 $("#shape").onchange = e => { store.set("shape", e.target.value); render(); };
@@ -1624,9 +1809,12 @@ new ResizeObserver(() => {
   if (params.get("spotify_error")) toast("Spotify: " + params.get("spotify_error"), 6000);
   if (params.toString()) history.replaceState(null, "", "/");
 
+  const me = api("/api/me").then(me => { S.me = me; renderAccount(); renderEmpty(); }).catch(() => {});
+  const order = api("/api/order").then(o => { S.orderIds = o.ids; }).catch(() => {});
   await loadAlbums();
+  Promise.all([me, order]).then(() => Device.restore()).catch(() => {});   // this computer's music, if a folder was chosen
   const st = await refreshStatus();
-  if (st && (st.library.scanning || st.spotify.syncing || st.demo.loading || params.get("spotify"))) watchStatus();
+  if (st && (st.library?.scanning || st.spotify.syncing || st.demo.loading || params.get("spotify"))) watchStatus();
   if (st?.spotify.connected) {
     if (Sdk.enabled()) Sdk.load();
     try {   // pick up whatever is already playing on Spotify
