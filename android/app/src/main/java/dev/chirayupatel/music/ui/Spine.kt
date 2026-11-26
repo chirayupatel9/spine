@@ -61,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -128,8 +129,13 @@ fun Spine(
     Box(
         modifier
             .then(if (vertical) Modifier.fillMaxWidth().height(extent) else Modifier.fillMaxHeight().width(extent))
-            .graphicsLayer {   // lifted out of the shelf: sideways in the stack, upwards on the wall
-                if (vertical) translationX = -lift * size.width * .05f else translationY = -lift * size.height * .06f
+            .zIndex(if (lift > 0f) 1f else 0f)   // in front of its neighbours while it's up
+            .graphicsLayer {   // lifted out of the shelf: sideways in the stack, up over the frame on the wall
+                if (vertical) translationX = -lift * size.width * .05f
+                else {
+                    translationY = -lift * minOf(size.height * .07f, 24.dp.toPx())
+                    shadowElevation = lift * 10.dp.toPx()
+                }
             }
             .clipToBounds()
             .drawBehind { if (outFrac <= 0f || coverAlpha < 1f) drawSpine(base, ink, vertical, band, cross.toPx(), pressed || lifted) }

@@ -506,7 +506,7 @@ private fun WallShelf(vm: AppViewModel) {
         val cp = with(density) { screenH.toPx() }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Bezel(Modifier.fillMaxWidth(), radius = if (vm.wallMode) 0.dp else 14.dp, pad = if (vm.wallMode) 0.dp else 14.dp) {
-                Box(Modifier.fillMaxWidth().height(screenH).clip(RoundedCornerShape(3.dp)).background(Color(0xFF050504))) {
+                Box(Modifier.fillMaxWidth().height(screenH).background(Color(0xFF050504), RoundedCornerShape(3.dp))) {   // the row clips the rest
                     LazyRow(state = state, modifier = Modifier.fillMaxSize().reorderGestures(reorder, vertical = false), horizontalArrangement = Arrangement.Center) {
                         items(list, key = { it.id }) { a ->
                             Spine(
@@ -553,9 +553,9 @@ private fun WallShelf(vm: AppViewModel) {
 private fun Bezel(modifier: Modifier, radius: Dp, pad: Dp, content: @Composable BoxScope.() -> Unit) {
     val shape = RoundedCornerShape(radius)
     Box(
-        modifier.shadow(if (radius > 0.dp) 24.dp else 0.dp, shape)
-            .clip(shape)
-            .background(Brush.verticalGradient(0f to Color(0xFF55575C), .18f to Color(0xFF34363A), .6f to Color(0xFF232427), 1f to Color(0xFF1A1B1D)))
+        // Not clipped, so a lifted spine on the wall shelf can rise over the frame.
+        modifier.shadow(if (radius > 0.dp) 24.dp else 0.dp, shape, clip = false)
+            .background(Brush.verticalGradient(0f to Color(0xFF55575C), .18f to Color(0xFF34363A), .6f to Color(0xFF232427), 1f to Color(0xFF1A1B1D)), shape)
             .border(1.dp, Color(0x8CCDCFD4), shape)
             .padding(pad),
         content = content,
