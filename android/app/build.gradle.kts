@@ -13,8 +13,8 @@ android {
         applicationId = "dev.chirayupatel.music"   // same as the Play listing: installs as an update
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "2.2.0"
+        versionCode = 5
+        versionName = "2.2.1"
     }
 
     buildTypes {

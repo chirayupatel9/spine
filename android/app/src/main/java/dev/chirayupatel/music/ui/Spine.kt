@@ -11,6 +11,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.hoverable
@@ -30,7 +31,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -91,6 +94,7 @@ fun Spine(
     lifted: Boolean = false,        // being dragged right now
     out: Boolean = false,           // open and playing: its record is out of the sleeve
     onRecordTap: () -> Unit = {},
+    onPutBack: () -> Unit = {},     // the × on the open cover
 ) {
     val opened by animateDpAsState(if (open) cross else thickness, tween(OPEN_MS, easing = OpenEasing), label = "spine")
     // The record comes out once the album has opened, and goes back in with it.
@@ -166,9 +170,10 @@ fun Spine(
                     Modifier.fillMaxSize().padding(top = cross * .05f, bottom = cross * .12f).graphicsLayer { alpha = labelAlpha },
                     contentAlignment = Alignment.TopCenter,
                 ) { Box(Modifier.verticalText()) { labelRow() } }
+                // the label's mark at the foot: a thin rule, since a box there reads as a checkbox
                 if (thickness >= 13.dp) Box(
-                    Modifier.align(Alignment.BottomCenter).padding(bottom = cross * .035f).fillMaxWidth(.56f).height(thickness * .56f)
-                        .graphicsLayer { alpha = labelAlpha * .38f }.border(1.dp, ink, RoundedCornerShape(1.dp)),
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = cross * .045f).fillMaxWidth(.44f).height(2.dp)
+                        .graphicsLayer { alpha = labelAlpha * .3f }.background(ink, RoundedCornerShape(1.dp)),
                 )
             }
         }
@@ -212,6 +217,19 @@ fun Spine(
             ) {
                 if (pill != "Tap for tracks") Eq(playing)
                 Text(pill, color = Color.White.copy(alpha = .92f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        if (pillAlpha > 0f) {   // × on the cover's corner: puts the album back on the shelf
+            val xs = (cross * .11f).coerceIn(28.dp, 38.dp)
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(cross * .025f).size(xs + 12.dp)   // a bigger target than it looks
+                    .graphicsLayer { alpha = pillAlpha; scaleX = .85f + .15f * pillAlpha; scaleY = .85f + .15f * pillAlpha }
+                    .clickable(remember { MutableInteractionSource() }, indication = null, onClickLabel = "Put back", onClick = onPutBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.size(xs).clip(CircleShape).background(Color(0x99141414)), contentAlignment = Alignment.Center) {
+                    Icon(AvIcons.Close, "Put back", tint = Color.White.copy(alpha = .92f), modifier = Modifier.size(xs * .52f))
+                }
             }
         }
         }

@@ -287,6 +287,7 @@ private fun VerticalStack(vm: AppViewModel) {
                             lifted = a.id == reorder.key,
                             out = a.id == vm.openId && a.id == vm.nowAlbumId && vm.nowTitle.isNotEmpty(),
                             onRecordTap = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.toggle() },
+                            onPutBack = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.putBack() },
                             modifier = if (a.id == reorder.key) Modifier.held(reorder, a.id, vertical = true) else Modifier.animateItem(),
                         )
                     }
@@ -509,6 +510,7 @@ private fun WallShelf(vm: AppViewModel) {
                                 lifted = a.id == reorder.key,
                                 out = a.id == vm.openId && a.id == vm.nowAlbumId && vm.nowTitle.isNotEmpty(),
                                 onRecordTap = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.toggle() },
+                                onPutBack = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.putBack() },
                                 modifier = if (a.id == reorder.key) Modifier.held(reorder, a.id, vertical = false) else Modifier.animateItem(),
                             )
                         }

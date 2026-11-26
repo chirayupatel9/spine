@@ -230,7 +230,8 @@ function addCover(el, a) {
   el.insertAdjacentHTML("beforeend",
     (a.art ? `<img class="cover" alt="" draggable="false" src="${esc(a.art)}">`
            : `<span class="cover nocover"><b>${esc(a.title)}</b><span>${esc(a.artist)}</span></span>`) +
-    `<span class="pill"><span class="eq"><i></i><i></i><i></i></span><span class="pl">Now playing</span></span>`);
+    `<span class="pill"><span class="eq"><i></i><i></i><i></i></span><span class="pl">Now playing</span></span>` +
+    `<span class="putback" title="Put back">${icon("close")}</span>`);
   updatePill();
 }
 
@@ -352,7 +353,7 @@ function setOpen(id, animate = true) {
   if (prev) {
     prev.classList.remove("open", "out");
     setSpin(prev.querySelector(".vinyl .label"), false);
-    setTimeout(() => { if (!prev.classList.contains("open")) prev.querySelectorAll(".cover,.pill,.vinyl").forEach(n => n.remove()); }, 700);
+    setTimeout(() => { if (!prev.classList.contains("open")) prev.querySelectorAll(".cover,.pill,.vinyl,.putback").forEach(n => n.remove()); }, 700);
   }
   S.openId = id;
   const el = id && S.els.get(id);
@@ -584,6 +585,7 @@ row.addEventListener("click", e => {
   const el = e.target.closest(".spine");
   if (!el) return;
   const id = el.dataset.id;
+  if (e.target.closest(".putback")) { haptic(8); putBack(id); return; }
   if (e.target.closest(".vinyl")) { haptic(6); Player.toggle(); return; }   // touch the record to pause it
   if (id === S.openId) openSheet(id, el.querySelector(".cover"));
   else tapToPlay(id);
@@ -925,9 +927,14 @@ $("#aPlay").onclick = () => {
   Player.playAlbum(S.sheet).then(renderSheetState);
 };
 $("#aShuffle").onclick = () => { setOpen(S.sheet.id); Player.playAlbum(S.sheet, null, true).then(renderSheetState); };
+/* Put an open album back on the shelf: the record goes back in its sleeve, so if it's the album
+   playing, the music stops too. */
+function putBack(id) {
+  if (Player.albumId() === id) Player.stop();
+  if (S.openId === id) setOpen(null);
+}
 $("#aPutBack").onclick = () => {
-  if (Player.albumId() === S.sheet.id) Player.stop();
-  setOpen(null);   // first, so the cover doesn't fly back onto a closing spine
+  putBack(S.sheet.id);   // first, so the cover doesn't fly back onto a closing spine
   closeSheets();
 };
 $("#aMore").onclick = () => ($("#aMenu").hidden = !$("#aMenu").hidden);

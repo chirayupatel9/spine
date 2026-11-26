@@ -132,9 +132,9 @@ body.wallmode.peek #topbar { transform: none; opacity: 1; }
 .spine .lbl b { font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: .92em; }
 .spine .lbl span { opacity: .82; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
 .spine.serif .lbl span { font-family: var(--serif); font-size: 1.12em; font-style: italic; }
-.spine .mark { /* the label's logo block at the foot of the spine */
-  position: absolute; left: 22%; right: 22%; bottom: calc(var(--screen-h) * .035); height: calc(var(--w) * .56);
-  border: 1px solid currentColor; opacity: .38; border-radius: 1px; transition: opacity 220ms var(--ease-out) 140ms;
+.spine .mark { /* the label's mark at the foot of the spine: a thin rule, since a box there reads as a checkbox */
+  position: absolute; left: 28%; right: 28%; bottom: calc(var(--screen-h) * .045); height: 2px;
+  background: currentColor; opacity: .3; border-radius: 1px; transition: opacity 220ms var(--ease-out) 140ms;
 }
 .spine.band::before { /* some spines carry a contrasting band near the top */
   content: ""; position: absolute; left: 0; right: 0; top: 0; height: calc(var(--screen-h) * .045); background: var(--t); opacity: .16;
@@ -158,13 +158,24 @@ body.notext .spine .lbl, body.notext .spine .mark { visibility: hidden; }
   transition: opacity 120ms var(--ease-out), transform 120ms var(--ease-out);
 }
 .spine.open .pill { opacity: 1; transform: translateX(-50%); transition: opacity 240ms var(--ease-out) 220ms, transform 320ms var(--ease-out) 220ms; }
+/* × on the open cover's corner: puts the album back on the shelf (and stops it, if it's the one playing) */
+.spine .putback {
+  --xs: clamp(28px, calc(var(--screen-h) * .11), 38px);
+  position: absolute; z-index: 2; top: calc(var(--screen-h) * .04); left: calc(var(--screen-h) * .96 - var(--xs));
+  width: var(--xs); height: var(--xs); border-radius: 50%; display: grid; place-items: center; cursor: pointer; pointer-events: none;
+  color: rgba(255,255,255,.92); background: rgba(20,20,20,.52); backdrop-filter: blur(10px) saturate(1.3); -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  opacity: 0; transform: scale(.85); transition: opacity 120ms var(--ease-out), transform 120ms var(--ease-out), background-color 150ms var(--ease-out);
+}
+.spine .putback::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; }   /* a bigger target than it looks */
+.spine .putback svg { width: 52%; height: 52%; }
+.spine.open .putback { opacity: 1; transform: none; pointer-events: auto; transition: opacity 240ms var(--ease-out) 220ms, transform 320ms var(--ease-out) 220ms, background-color 150ms var(--ease-out); }
 .eq { display: inline-flex; align-items: flex-end; gap: 2px; height: .9em; }
 .eq i { width: 2px; height: 100%; background: currentColor; border-radius: 1px; transform-origin: bottom; animation: eq 1s ease-in-out infinite; }
 .eq i:nth-child(2) { animation-delay: -.35s; } .eq i:nth-child(3) { animation-delay: -.7s; }
 .paused .eq i { animation: none; transform: scaleY(.35); }
 @keyframes eq { 0%, 100% { transform: scaleY(.3) } 50% { transform: scaleY(1) } }
 
-#row.instant .spine, #row.instant .cover, #row.instant .pill, #row.instant .vinyl { transition: none !important; }
+#row.instant .spine, #row.instant .cover, #row.instant .pill, #row.instant .vinyl, #row.instant .putback { transition: none !important; }
 
 /* a record: grooves and the light on them stay put; only the label turns (app.js spins it up when
    the music starts and lets it coast to a stop on pause) */
@@ -429,6 +440,7 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
   .spine:hover { filter: brightness(1.12); }
   .p-ctrl .big:hover { background: #fff; }
   #aTracks li:hover, #npQueue li:hover { background: rgba(255,255,255,.04); }
+  .spine .putback:hover { background: rgba(20,20,20,.8); }
   .np-bar:hover .np-thumb { transform: scale(1); }
 }
 

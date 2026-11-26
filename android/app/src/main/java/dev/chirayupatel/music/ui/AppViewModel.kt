@@ -304,7 +304,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val a = detail(albumId)
             if (a.trackList.isEmpty()) { message = "This album has no playable tracks"; return@launch }
             if (a.source == "spotify") {
-                controller?.pause()
+                controller?.run { stop(); clearMediaItems() }   // this phone's own queue is done with
                 val offset = if (shuffle) Random.nextInt(a.trackList.size) else (index ?: 0)
                 api.spotifyPlay(a.uri, offset)
                 spotifyMode = true; upNext = emptyList()
@@ -415,9 +415,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Put the open album back on the shelf: its record goes back in the sleeve, so if it's the album
+     *  playing, the music stops too. */
     fun putBack() {
-        if (nowAlbumId == openId) controller?.run { stop(); clearMediaItems() }
-        if (nowAlbumId == openId) { nowAlbumId = null; nowTitle = ""; isPlaying = false; showPlayer = false; upNext = emptyList() }
+        if (nowAlbumId != null && nowAlbumId == openId) {
+            if (spotifyMode) { spotifyMode = false; viewModelScope.launch { runCatching { api.spotifyControl("pause") } } }
+            controller?.run { stop(); clearMediaItems() }
+            nowAlbumId = null; nowTitle = ""; isPlaying = false; showPlayer = false; upNext = emptyList()
+        }
         openId = null
         sheet = null
     }
