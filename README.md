@@ -1,6 +1,6 @@
 # Spine (self-hosted)
 
-Your albums shown as spines on a shelf, from **Spotify** and your **own music folder**. Tap a spine to pull the album out, then tap Play.
+Your music collection as one long row of album spines on a wall display, from **Spotify**, your **own music folder**, or a built-in **demo shelf**. Tap a spine and the album opens in place, showing its cover, and starts playing. Tap the open cover for the track list.
 
 It's one small FastAPI server plus a touch-friendly web app. You can install it as an app on an **Android tablet** or on **Windows**. It also runs fullscreen on any screen you mount on a wall.
 
@@ -18,11 +18,14 @@ It's one small FastAPI server plus a touch-friendly web app. You can install it 
   - Your saved albums sync onto the shelf.
   - You can add any album by pasting its link.
   - You can play on any Spotify device (phone, PC, speaker or TV). On desktop browsers, the screen running Spine can also be the speaker.
-- **Shelf.**
-  - Each spine takes its colour from the cover, and its thickness from the track count.
-  - You can sort by artist, recently added, title, year or **colour** (a rainbow shelf).
-  - You can search, hide albums, and change the shelf height.
-- **Wall mode** (⤢). Spine goes fullscreen, keeps the screen awake, and hides the bars until you tap.
+- **Demo shelf.** One click loads 34 well-known albums from the iTunes catalogue, with real covers and 30-second previews that play on the screen. No account is needed, so you can try Spine before connecting anything. Remove it again in **Settings → Demo shelf**.
+- **The display.**
+  - The row sits in a gunmetal bezel on a dark wall, shaped like a 28″ stretched-bar screen. **Settings → Display → Shape** switches between that bar, a wider screen, or filling the window.
+  - Each spine takes its colour from the cover, and its thickness from the track count. Scroll the row by swiping, dragging with the mouse, or with the mouse wheel.
+  - The playing album stays open on the shelf with a *Now playing* label, and the wall glows faintly in its colour.
+- **Arrange.** By artist, decade, recently added, title, **colour** (a rainbow shelf), or **manual order**: hold a spine, then drag it to a new place. The manual order is saved on the server, so every screen shares it. A jump strip under the display (A–Z or decades) scrolls straight to a section.
+- You can search, and hide albums.
+- **Wall mode** (⤢). Spine goes fullscreen, keeps the screen awake, and hides the bars until you tap. On a stretched-bar screen the row fills it; on a tablet the bar is letterboxed unless the shape is set to *Fill the window*.
 - **Optional password** that protects the whole app when it's hosted.
 
 ## Run it
@@ -40,6 +43,13 @@ pip install -r requirements.txt
 MUSIC_DIR=~/Music DATA_DIR=./data PUBLIC_URL=http://127.0.0.1:8000 \
   uvicorn app.main:app --app-dir . --host 0.0.0.0 --port 8000
 ```
+
+On Windows (PowerShell):
+```powershell
+python -m venv .venv; .venv\Scripts\pip install -r requirements.txt
+$env:MUSIC_DIR="$HOME\Music"; $env:DATA_DIR="data"; .venv\Scripts\python -m uvicorn app.main:app --port 8000
+```
+Open http://127.0.0.1:8000 and select **Load demo shelf** to see it working straight away.
 
 ## Spotify setup (5 minutes)
 1. Go to https://developer.spotify.com/dashboard, select **Create app**, and choose **Web API** and **Web Playback SDK**.
@@ -64,11 +74,13 @@ Notes:
 ## API (if you want to script it)
 | Method | Path | |
 |---|---|---|
-| GET | `/api/albums` | shelf (`?source=local|spotify&include_hidden=true`) |
+| GET | `/api/albums` | shelf (`?source=local|spotify|demo&include_hidden=true`) |
 | GET | `/api/albums/{id}` | album + tracks |
 | PATCH | `/api/albums/{id}` | `{"hidden": true}` |
 | POST | `/api/albums/{id}/art` | upload a cover (multipart `file`) |
 | POST | `/api/albums/{id}/art/search` | `{"artist","album","song"}` online lookup |
+| PUT | `/api/order` | manual shelf order (`{"ids": [...]}`) |
+| POST | `/api/demo/load` | load the demo shelf (`DELETE /api/demo` removes it) |
 | POST | `/api/library/rescan` | rescan the folder (`?force_art=true` to re-find artwork) |
 | GET | `/api/local/stream/{track_id}` | audio stream (supports Range) |
 | POST | `/api/spotify/sync` / `add` / `play` / `control` / `transfer` | Spotify |
@@ -80,5 +92,6 @@ app/main.py      routes, password gate, static files
 app/library.py   folder scan, tag reading, album grouping
 app/artwork.py   embedded/folder/iTunes/MusicBrainz art, spine colours
 app/spotify.py   OAuth, saved-album sync, playback control
+app/demo.py      demo shelf from the iTunes catalogue (covers + 30-second previews)
 web/             the shelf UI (vanilla JS PWA, no build step)
 ```

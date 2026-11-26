@@ -1,4 +1,4 @@
-/* Spine — album-spine shelf for Spotify + a local library */
+/* Spine — your albums as a row of spines on a wall display. Spotify, a local library, or the demo shelf. */
 "use strict";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -10,11 +10,17 @@ const store = {
 
 const S = {
   albums: [],
+  byId: new Map(),
+  els: new Map(),          // album id -> spine element
+  list: [],                // albums currently on the row, in order
   source: store.get("source", "all"),
   sort: store.get("sort", "artist"),
   search: "",
   status: null,
-  open: null,              // album shown in sheet
+  openId: null,            // album pulled open on the shelf
+  sheet: null,             // album shown in the details sheet
+  details: new Map(),      // id -> album with track_list
+  H: 300,                  // screen height in px
 };
 
 async function api(path, opts = {}) {
@@ -35,9 +41,15 @@ function toast(msg, ms = 3200) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms);
 }
 const fmt = s => { if (!s && s !== 0) return ""; s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const icon = name => `<svg><use href="#i-${name}"/></svg>`;
+function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
 
-/* ======================================================== shelf */
+/* ======================================================== arranging */
+
+const artistKey = s => (s || "").replace(/^the\s+/i, "").trim();
+const cmp = (a, b) => (a || "").localeCompare(b || "", undefined, { sensitivity: "base", numeric: true });
 
 function hueKey(hex) {
   const n = parseInt((hex || "#333333").slice(1), 16);
@@ -48,138 +60,476 @@ function hueKey(hex) {
   return ((h * 60 + 360) % 360) + (1 - l) * 0.5;
 }
 
+const SORTS = {
+  artist: (a, b) => cmp(artistKey(a.artist), artistKey(b.artist)) || cmp(a.year, b.year) || cmp(a.title, b.title),
+  decade: (a, b) => cmp(a.year || "9999", b.year || "9999") || cmp(artistKey(a.artist), artistKey(b.artist)),
+  added: (a, b) => (b.added_at || 0) - (a.added_at || 0),
+  title: (a, b) => cmp(a.title, b.title),
+  color: (a, b) => hueKey(a.color) - hueKey(b.color),
+  manual: (a, b) => (a.pos ?? 1e9) - (b.pos ?? 1e9) || SORTS.artist(a, b),
+};
+
 function visibleAlbums() {
   const q = S.search.trim().toLowerCase();
-  let list = S.albums.filter(a => (S.source === "all" || a.source === S.source) &&
-    (!q || a.title.toLowerCase().includes(q) || a.artist.toLowerCase().includes(q)));
-  const by = {
-    artist: (a, b) => a.artist.localeCompare(b.artist, undefined, { sensitivity: "base" }) || (a.year || "").localeCompare(b.year || "") || a.title.localeCompare(b.title),
-    title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
-    year: (a, b) => (b.year || "0").localeCompare(a.year || "0") || a.artist.localeCompare(b.artist),
-    added: (a, b) => (b.added_at || 0) - (a.added_at || 0),
-    color: (a, b) => hueKey(a.color) - hueKey(b.color),
-  }[S.sort];
-  return list.sort(by);
+  return S.albums.filter(a => (S.source === "all" || a.source === S.source) &&
+    (!q || a.title.toLowerCase().includes(q) || a.artist.toLowerCase().includes(q))).sort(SORTS[S.sort]);
 }
 
-function spineWidth(a, h) {
+function indexKey(a) {
+  if (S.sort === "artist" || S.sort === "title") {
+    const c = (S.sort === "artist" ? artistKey(a.artist) : a.title.replace(/^the\s+/i, "")).normalize("NFKD")[0]?.toUpperCase() || "#";
+    return /[A-Z]/.test(c) ? c : "#";
+  }
+  if (S.sort === "decade") return a.year ? `${a.year.slice(0, 3)}0s` : "Undated";
+  return null;
+}
+
+/* ======================================================== the display */
+
+function layout() {
+  const screen = $("#screen"), device = $("#device"), room = $("#room");
+  const shape = store.get("shape", "bar");
+  const aspect = shape === "wide" ? 3.2 : 5.33;
+  if (document.body.classList.contains("wallmode")) {
+    // Edge to edge. A stretched-bar display fills naturally; on a tablet the bar is letterboxed
+    // unless the shape is "fill".
+    const vw = room.clientWidth || innerWidth, vh = room.clientHeight || innerHeight;
+    S.H = Math.round(shape === "fill" ? vh : Math.min(vh, vw / aspect));
+  } else {
+    const pad = parseFloat(getComputedStyle(device).paddingTop) * 2 || 0;
+    const width = device.clientWidth - pad;
+    const avail = room.clientHeight - 140 - pad;
+    const want = shape === "fill" ? avail : width / aspect;
+    const floor = Math.min(220, Math.max(130, width * 0.6));   // phones: keep spines wide enough to read
+    S.H = Math.round(Math.max(floor, Math.min(want, avail)));
+  }
+  screen.style.height = S.H + "px";
+  document.documentElement.style.setProperty("--screen-h", S.H + "px");
+}
+
+function spineWidth(a) {
   const n = a.tracks || 10;
-  const base = Math.min(64, Math.max(30, 24 + n * 2.3));
-  return Math.round(base * Math.max(0.7, h / 300));
+  const f = n <= 6 ? 0.8 : n <= 16 ? 1 : n <= 24 ? 1.4 : 1.8;
+  const jitter = 0.92 + (hash(a.id) % 100) / 100 * 0.16;
+  return Math.max(9, Math.round(S.H / 12.5 * f * jitter));
+}
+
+function makeSpine(a) {
+  const w = spineWidth(a), h = hash(a.id + a.title);
+  const el = document.createElement("button");
+  el.className = "spine" + (h % 3 === 0 ? " band" : "") + (h % 5 === 1 ? " serif" : "") +
+    (a.hidden ? " hiddenalb" : "") + (w < 13 ? " tiny" : "");
+  el.style.cssText = `--w:${w}px;--c:${a.color};--t:${a.text_color};--fs:${clamp(w * 0.37, 7, 13).toFixed(1)}px`;
+  el.dataset.id = a.id;
+  el.dataset.w = w;
+  el.setAttribute("role", "listitem");
+  el.setAttribute("aria-label", `${a.artist}, ${a.title}`);
+  el.title = `${a.artist} — ${a.title}${a.year ? ` (${a.year})` : ""}`;
+  el.innerHTML = `<span class="lbl"><b>${esc(a.artist)}</b><span>${esc(a.title)}</span></span><i class="mark"></i>`;
+  return el;
+}
+
+function addCover(el, a) {
+  if (el.querySelector(".cover")) return;
+  el.insertAdjacentHTML("beforeend",
+    (a.art ? `<img class="cover" alt="" draggable="false" src="${esc(a.art)}">`
+           : `<span class="cover nocover"><b>${esc(a.title)}</b><span>${esc(a.artist)}</span></span>`) +
+    `<span class="pill"><span class="eq"><i></i><i></i><i></i></span><span class="pl">Now playing</span></span>`);
+  updatePill();
 }
 
 function render() {
-  const h = store.get("shelfH", Math.round(Math.min(340, Math.max(220, innerHeight * 0.36))));
-  document.documentElement.style.setProperty("--shelf-h", h + "px");
+  layout();
   document.body.classList.toggle("notext", !store.get("spineNames", true));
-
+  const row = $("#row");
   const list = visibleAlbums();
-  const box = $("#shelves");
-  box.innerHTML = "";
-  $("#empty").hidden = S.albums.length > 0;
-  if (!list.length) return;
-
-  const avail = box.clientWidth - 20;
-  const rows = [[]];
-  let used = 0;
-  for (const a of list) {
-    const w = spineWidth(a, h);
-    if (used + w + 2 > avail && rows[rows.length - 1].length) { rows.push([]); used = 0; }
-    rows[rows.length - 1].push([a, w]); used += w + 2;
-  }
-
-  const widest = Math.max(...rows.map(r => r.reduce((t, [, w]) => t + w + 2, 0)));
-  const inset = Math.max(0, Math.floor((avail - widest) / 2));
-  const playingId = Player.albumId();
+  const prevScroll = row.scrollLeft;
+  S.list = list;
+  S.els.clear();
+  row.classList.add("instant");
+  row.innerHTML = "";
   const frag = document.createDocumentFragment();
-  rows.forEach((row, i) => {
-    const shelf = document.createElement("div");
-    shelf.className = "shelf";
-    shelf.style.paddingLeft = inset + 10 + "px";
-    if (S.sort === "artist") {
-      const first = row[0][0].artist[0]?.toUpperCase() || "", last = row[row.length - 1][0].artist[0]?.toUpperCase() || "";
-      shelf.innerHTML = `<div class="shelf-label">${esc(first === last ? first : first + " – " + last)}</div>`;
-    }
-    for (const [a, w] of row) {
-      const el = document.createElement("div");
-      el.className = "spine" + (a.hidden ? " hiddenalb" : "") + (a.id === playingId ? " playing" : "");
-      el.style.cssText = `width:${w}px;--c:${a.color};--t:${a.text_color}`;
-      el.dataset.id = a.id;
-      el.title = `${a.artist} — ${a.title}`;
-      el.innerHTML =
-        (a.art ? `<div class="chip" style="background-image:url('${a.art.replace(/'/g, "%27")}')"></div>` : "") +
-        `<div class="txt"><b>${esc(a.artist)}</b><span>${esc(a.title)}</span></div>` +
-        `<div class="src">${a.source === "spotify" ? "●" : ""}</div>`;
-      shelf.appendChild(el);
-    }
-    frag.appendChild(shelf);
-  });
-  box.appendChild(frag);
+  for (const a of list) {
+    const el = makeSpine(a);
+    if (a.id === S.openId) { el.classList.add("open"); addCover(el, a); }
+    S.els.set(a.id, el);
+    frag.appendChild(el);
+  }
+  row.appendChild(frag);
+  $("#empty").hidden = S.albums.length > 0 || !S.loaded;
+  renderIndex();
+  if (S.openId && S.els.has(S.openId)) centerOn(S.openId, false);
+  else row.scrollLeft = prevScroll;
+  requestAnimationFrame(() => requestAnimationFrame(() => row.classList.remove("instant")));
+  updatePill();
+  updateHint();
 }
 
+function renderIndex() {
+  const nav = $("#index");
+  nav.innerHTML = "";
+  S.keyAt = null;
+  if (S.list.length < 8) return;
+  const firsts = new Map();
+  for (const a of S.list) { const k = indexKey(a); if (k !== null && !firsts.has(k)) firsts.set(k, a.id); }
+  if (firsts.size < 2) return;
+  S.keyAt = new Map(S.list.map(a => [a.id, indexKey(a)]));
+  for (const [k, id] of firsts) {
+    const b = document.createElement("button");
+    b.textContent = k; b.dataset.key = k;
+    b.onclick = () => { const el = S.els.get(id); if (el) scrollRowTo(el.offsetLeft - 1, true); };
+    nav.appendChild(b);
+  }
+  markIndex();
+}
+
+let idxRaf = 0;
+function markIndex() {
+  idxRaf = 0;
+  if (!S.keyAt) return;
+  const row = $("#row"), kids = row.children, mid = row.scrollLeft + row.clientWidth / 2;
+  let lo = 0, hi = kids.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (kids[m].offsetLeft <= mid) lo = m; else hi = m - 1; }
+  const key = kids[lo] && S.keyAt.get(kids[lo].dataset.id);
+  $$("#index button").forEach(b => b.classList.toggle("on", b.dataset.key === key));
+}
+
+function updateHint() {
+  let t = "";
+  if (!S.albums.length) t = "";
+  else if (!S.list.length) t = S.search ? `Nothing on the shelf matches “${S.search}”` : "Nothing on the shelf from this source yet";
+  else if (S.sort === "manual") t = "Hold a spine, then drag it to a new place";
+  else if (S.openId) t = "Tap the cover for tracks · tap another spine to play it";
+  else t = "Tap a spine to play it";
+  $("#hint").textContent = t;
+}
+
+/* ---------------- opening an album on the shelf */
+
+function setOpen(id, animate = true) {
+  if (S.openId === id) { if (id) centerOn(id, animate); return; }
+  const prev = S.openId && S.els.get(S.openId);
+  if (prev) {
+    prev.classList.remove("open");
+    setTimeout(() => { if (!prev.classList.contains("open")) prev.querySelectorAll(".cover,.pill").forEach(n => n.remove()); }, 700);
+  }
+  S.openId = id;
+  const el = id && S.els.get(id);
+  if (el) {
+    addCover(el, S.byId.get(id));
+    void el.offsetWidth;
+    el.classList.add("open");
+    centerOn(id, animate);
+  }
+  setGlow();
+  updatePill();
+  updateHint();
+}
+
+/* Where the row should scroll to so an album sits in the middle, using the widths it will have
+   once the open/close transitions finish. */
+function centerOn(id, animate) {
+  const row = $("#row");
+  let x = 0, target = null;
+  for (const el of row.children) {
+    const w = el.dataset.id === id ? S.H : el.classList.contains("open") ? S.H : +el.dataset.w;
+    if (el.dataset.id === id) target = x + w / 2;
+    x += w;
+  }
+  if (target === null) return;
+  const left = clamp(target - row.clientWidth / 2, 0, Math.max(0, x - row.clientWidth));
+  scrollRowTo(left, animate);
+}
+
+let scrollAnim = 0;
+function stopScrollAnim() { cancelAnimationFrame(scrollAnim); scrollAnim = 0; }
+function scrollRowTo(left, animate) {
+  const row = $("#row");
+  stopScrollAnim();
+  if (!animate) { row.scrollLeft = left; return; }
+  const from = row.scrollLeft, t0 = performance.now(), dur = 620;
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  const step = now => {
+    const t = Math.min(1, (now - t0) / dur);
+    row.scrollLeft = from + (left - from) * ease(t);
+    scrollAnim = t < 1 ? requestAnimationFrame(step) : 0;
+  };
+  scrollAnim = requestAnimationFrame(step);
+}
+
+function updatePill() {
+  const el = S.openId && S.els.get(S.openId);
+  if (!el) return;
+  const pill = el.querySelector(".pill");
+  if (!pill) return;
+  const isPlayingAlbum = Player.albumId() === S.openId;
+  const playing = isPlayingAlbum && Player.playing();
+  pill.classList.toggle("paused", !playing);
+  pill.querySelector(".pl").textContent = playing ? "Now playing" : isPlayingAlbum ? "Paused" : "Tap for tracks";
+  pill.querySelector(".eq").hidden = !isPlayingAlbum;
+}
+
+function setGlow() {
+  const a = S.byId.get(Player.albumId() || S.openId);
+  document.documentElement.style.setProperty("--glow", a && store.get("glow", true) ? a.color : "transparent");
+}
+
+/* ---------------- loading */
+
 async function loadAlbums() {
-  S.albums = await api(`/api/albums?include_hidden=${store.get("showHidden", false)}`);
+  const list = await api(`/api/albums?include_hidden=${store.get("showHidden", false)}`);
+  S.albums = list;
+  S.byId = new Map(list.map(a => [a.id, a]));
+  S.loaded = true;
+  const hasDemo = list.some(a => a.source === "demo");
+  $('#sourceSeg [data-source="demo"]').hidden = !hasDemo;
+  if (S.source === "demo" && !hasDemo) setSource("all");
   render();
 }
 
-$("#shelves").addEventListener("click", e => {
+async function detail(id, fresh = false) {
+  if (!fresh && S.details.has(id)) return S.details.get(id);
+  const a = await api(`/api/albums/${encodeURIComponent(id)}`);
+  S.details.set(id, a);
+  return a;
+}
+
+/* ======================================================== touching the row */
+
+const row = $("#row");
+
+row.addEventListener("click", e => {
+  if (Drag.suppressClick) { Drag.suppressClick = false; return; }
   const el = e.target.closest(".spine");
   if (!el) return;
-  el.classList.add("lift");
-  setTimeout(() => el.classList.remove("lift"), 260);
-  openAlbum(el.dataset.id);
+  const id = el.dataset.id;
+  if (id === S.openId) openSheet(id);
+  else tapToPlay(id);
 });
 
-/* ======================================================== album sheet */
+async function tapToPlay(id) {
+  setOpen(id);
+  try { await Player.playAlbum(await detail(id), 0); }
+  catch (err) { toast(err.message); }
+}
 
-async function openAlbum(id) {
-  const a = await api(`/api/albums/${id}`);
-  S.open = a;
+/* mouse: drag to scroll with a little momentum (touch screens scroll natively) */
+const Drag = { active: false, moved: false, startX: 0, startScroll: 0, lastX: 0, lastT: 0, v: 0, suppressClick: false };
+let glideRaf = 0;
+function glide(v) {
+  cancelAnimationFrame(glideRaf);
+  let last = performance.now();
+  const step = now => {
+    const dt = now - last; last = now;
+    row.scrollLeft += v * dt;
+    v *= Math.pow(0.94, dt / 16);
+    if (Math.abs(v) > 0.02) glideRaf = requestAnimationFrame(step);
+  };
+  glideRaf = requestAnimationFrame(step);
+}
+
+row.addEventListener("pointerdown", e => {
+  stopScrollAnim(); cancelAnimationFrame(glideRaf);
+  Arrange.down(e);
+  if (e.pointerType !== "mouse" || e.button !== 0) return;
+  Object.assign(Drag, { active: true, moved: false, startX: e.clientX, startScroll: row.scrollLeft, lastX: e.clientX, lastT: e.timeStamp, v: 0 });
+});
+addEventListener("pointermove", e => {
+  if (Arrange.move(e)) return;
+  if (!Drag.active) return;
+  const dx = e.clientX - Drag.startX;
+  if (!Drag.moved && Math.abs(dx) > 5) { Drag.moved = true; row.classList.add("dragging"); }
+  if (!Drag.moved) return;
+  row.scrollLeft = Drag.startScroll - dx;
+  const dt = e.timeStamp - Drag.lastT;
+  if (dt > 0) Drag.v = 0.7 * ((Drag.lastX - e.clientX) / dt) + 0.3 * Drag.v;
+  Drag.lastX = e.clientX; Drag.lastT = e.timeStamp;
+});
+addEventListener("pointerup", e => {
+  if (Arrange.up(e)) return;
+  if (!Drag.active) return;
+  Drag.active = false;
+  if (Drag.moved) {
+    row.classList.remove("dragging");
+    Drag.suppressClick = true;
+    setTimeout(() => (Drag.suppressClick = false), 50);
+    if (e.timeStamp - Drag.lastT < 80) glide(clamp(Drag.v, -4, 4));
+  }
+});
+addEventListener("pointercancel", e => { Arrange.cancel(e); Drag.active = false; row.classList.remove("dragging"); });
+
+row.addEventListener("wheel", e => {
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+  e.preventDefault();
+  stopScrollAnim(); cancelAnimationFrame(glideRaf);
+  row.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 32 : 1);
+}, { passive: false });
+
+row.addEventListener("scroll", () => { if (!idxRaf) idxRaf = requestAnimationFrame(markIndex); }, { passive: true });
+row.addEventListener("contextmenu", e => { if (S.sort === "manual") e.preventDefault(); });
+row.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+    e.preventDefault();
+    scrollRowTo(row.scrollLeft + (e.key === "ArrowRight" ? 1 : -1) * row.clientWidth * 0.4, true);
+  }
+});
+
+/* manual order: hold a spine, then drag it along the row */
+const Arrange = {
+  timer: 0, el: null, picked: false, startX: 0, x: 0, edgeRaf: 0,
+  down(e) {
+    clearTimeout(this.timer);
+    if (S.sort !== "manual") return;
+    const el = e.target.closest(".spine");
+    if (!el) return;
+    this.el = el; this.startX = this.x = e.clientX;
+    this.timer = setTimeout(() => this.pick(e.pointerId), e.pointerType === "mouse" ? 260 : 380);
+  },
+  pick(pointerId) {
+    this.timer = 0;
+    this.picked = true;
+    Drag.active = false; row.classList.remove("dragging");
+    this.el.classList.add("picked");
+    document.body.classList.add("arranging");
+    try { row.setPointerCapture(pointerId); } catch {}
+    navigator.vibrate?.(12);
+    this.edge();
+  },
+  move(e) {
+    if (this.timer && Math.abs(e.clientX - this.startX) > 6) { clearTimeout(this.timer); this.timer = 0; }
+    if (!this.picked) return false;
+    this.x = e.clientX;
+    this.place();
+    return true;
+  },
+  place() {
+    const kids = [...row.children].filter(k => k !== this.el);
+    let before = null;
+    for (const k of kids) { const r = k.getBoundingClientRect(); if (this.x < r.left + r.width / 2) { before = k; break; } }
+    if (before ? this.el.nextElementSibling !== before : row.lastElementChild !== this.el) row.insertBefore(this.el, before);
+  },
+  edge() { // scroll while the picked spine is held near either end
+    if (!this.picked) return;
+    const r = row.getBoundingClientRect(), zone = Math.min(80, r.width * 0.12);
+    const v = this.x < r.left + zone ? -1 : this.x > r.right - zone ? 1 : 0;
+    if (v) { row.scrollLeft += v * 9; this.place(); }
+    this.edgeRaf = requestAnimationFrame(() => this.edge());
+  },
+  up() {
+    clearTimeout(this.timer); this.timer = 0;
+    if (!this.picked) return false;
+    this.drop();
+    Drag.suppressClick = true;
+    setTimeout(() => (Drag.suppressClick = false), 50);
+    return true;
+  },
+  cancel() { clearTimeout(this.timer); this.timer = 0; if (this.picked) this.drop(); },
+  drop() {
+    this.picked = false;
+    cancelAnimationFrame(this.edgeRaf);
+    this.el.classList.remove("picked");
+    document.body.classList.remove("arranging");
+    saveOrder();
+  },
+};
+row.addEventListener("touchmove", e => { if (Arrange.picked) e.preventDefault(); }, { passive: false });
+
+async function saveOrder() {
+  const shown = [...row.children].map(el => el.dataset.id);
+  const shownSet = new Set(shown);
+  const full = S.albums.slice().sort(SORTS.manual).map(a => a.id);
+  let k = 0;
+  const ids = full.map(id => (shownSet.has(id) ? shown[k++] : id));
+  ids.forEach((id, i) => { const a = S.byId.get(id); if (a) a.pos = i; });
+  S.list = shown.map(id => S.byId.get(id));
+  renderIndex();
+  try { await api("/api/order", { method: "PUT", body: { ids } }); }
+  catch (err) { toast("Couldn't save the order: " + err.message); }
+}
+
+/* ======================================================== album details */
+
+async function openSheet(id) {
+  let a;
+  try { a = await detail(id); } catch (err) { return toast(err.message); }
+  S.sheet = a;
   $("#aCover").src = a.art || "";
   $("#aCover").style.background = a.color;
   $("#aTitle").textContent = a.title;
   $("#aArtist").textContent = a.artist + (a.year ? ` · ${a.year}` : "");
-  $("#aSource").textContent = a.source === "spotify" ? "Spotify" : "Local library" + (a.art_status === "missing" ? " · no cover found" : "");
+  $("#aSource").textContent = { spotify: "Spotify", demo: "Demo shelf · 30-second previews" }[a.source] ||
+    "Local library" + (a.art_status === "missing" ? " · no cover found" : "");
   $("#aHide").textContent = a.hidden ? "Show on shelf" : "Hide from shelf";
+  $("#aFixArt").hidden = a.source !== "local";
   $("#aMenu").hidden = true; $("#artForm").hidden = true;
+  renderSheetState();
+  $("#albumSheet").hidden = false;
+}
+
+function renderSheetState() {
+  const a = S.sheet;
+  if (!a) return;
+  const mine = Player.albumId() === a.id;
+  const playing = mine && Player.playing();
+  $("#aPlay").innerHTML = icon(playing ? "pause" : "play") + `<span>${playing ? "Pause" : mine ? "Resume" : "Play"}</span>`;
+  $("#aPutBack").hidden = S.openId !== a.id;
   const multiDisc = new Set(a.track_list.map(t => t.disc_no || 1)).size > 1;
   $("#aTracks").innerHTML = a.track_list.map((t, i) =>
     `<li data-i="${i}" class="${Player.isTrack(t.id) ? "now" : ""}"><span class="n">${multiDisc ? (t.disc_no || 1) + "." : ""}${t.track_no || i + 1}</span>` +
     `<span class="tt">${esc(t.title)}${t.artist && t.artist !== a.artist ? ` <span style="color:var(--muted)">· ${esc(t.artist)}</span>` : ""}</span>` +
     `<span class="d">${fmt(t.duration)}</span></li>`).join("");
-  $("#albumSheet").hidden = false;
 }
 
 $("#aTracks").addEventListener("click", e => {
   const li = e.target.closest("li"); if (!li) return;
-  Player.playAlbum(S.open, +li.dataset.i);
+  setOpen(S.sheet.id);
+  Player.playAlbum(S.sheet, +li.dataset.i).then(renderSheetState);
 });
-$("#aPlay").onclick = () => Player.playAlbum(S.open, 0);
-$("#aShuffle").onclick = () => Player.playAlbum(S.open, 0, true);
+$("#aPlay").onclick = () => {
+  if (Player.albumId() === S.sheet.id) { Player.toggle(); setTimeout(renderSheetState, 50); return; }
+  setOpen(S.sheet.id);
+  Player.playAlbum(S.sheet, 0).then(renderSheetState);
+};
+$("#aShuffle").onclick = () => { setOpen(S.sheet.id); Player.playAlbum(S.sheet, 0, true).then(renderSheetState); };
+$("#aPutBack").onclick = () => {
+  if (Player.albumId() === S.sheet.id) Player.stop();
+  closeSheets();
+  setOpen(null);
+};
 $("#aMore").onclick = () => ($("#aMenu").hidden = !$("#aMenu").hidden);
 $("#aHide").onclick = async () => {
-  await api(`/api/albums/${S.open.id}`, { method: "PATCH", body: { hidden: !S.open.hidden } });
+  await api(`/api/albums/${encodeURIComponent(S.sheet.id)}`, { method: "PATCH", body: { hidden: !S.sheet.hidden } });
+  S.details.delete(S.sheet.id);
+  if (S.openId === S.sheet.id && !S.sheet.hidden) setOpen(null);
   closeSheets(); loadAlbums();
 };
 $("#aFixArt").onclick = () => {
   const f = $("#artForm"); f.hidden = false; $("#aMenu").hidden = true;
-  f.artist.value = S.open.artist; f.album.value = S.open.title; f.song.value = S.open.track_list[0]?.title || "";
+  f.artist.value = S.sheet.artist; f.album.value = S.sheet.title; f.song.value = S.sheet.track_list[0]?.title || "";
   $("#artMsg").textContent = "";
 };
+async function artUpdated(a) {
+  S.details.set(a.id, { ...S.sheet, ...a });
+  S.sheet = S.details.get(a.id);
+  $("#aCover").src = a.art;
+  const was = S.openId; S.openId = null;
+  await loadAlbums();
+  if (was) setOpen(was, false);
+}
 $("#artForm").onsubmit = async e => {
   e.preventDefault();
   const f = e.target; $("#artMsg").textContent = "Searching…";
   try {
-    const a = await api(`/api/albums/${S.open.id}/art/search`, { method: "POST", body: { artist: f.artist.value, album: f.album.value, song: f.song.value } });
-    $("#artMsg").textContent = "Found it."; $("#aCover").src = a.art; loadAlbums();
+    const a = await api(`/api/albums/${encodeURIComponent(S.sheet.id)}/art/search`, { method: "POST", body: { artist: f.artist.value, album: f.album.value, song: f.song.value } });
+    $("#artMsg").textContent = "Found it."; artUpdated(a);
   } catch (err) { $("#artMsg").textContent = err.message; }
 };
 $("#artFile").onchange = async e => {
   const file = e.target.files[0]; if (!file) return;
   const fd = new FormData(); fd.append("file", file);
   try {
-    const a = await api(`/api/albums/${S.open.id}/art`, { method: "POST", body: fd });
-    $("#aCover").src = a.art; $("#artMsg").textContent = "Updated."; loadAlbums();
+    const a = await api(`/api/albums/${encodeURIComponent(S.sheet.id)}/art`, { method: "POST", body: fd });
+    $("#artMsg").textContent = "Updated."; artUpdated(a);
   } catch (err) { $("#artMsg").textContent = err.message; }
 };
 
@@ -188,50 +538,53 @@ $("#artFile").onchange = async e => {
 const audio = $("#audio");
 
 const Player = {
-  mode: null,          // 'local' | 'spotify'
+  mode: null,          // 'browser' (local files, demo previews) | 'spotify'
   album: null,
   queue: [], index: 0,
-  sp: null,            // last spotify state
+  sp: null,            // last Spotify state
   pollT: null,
 
-  albumId() { return this.mode === "local" ? this.album?.id : this.sp?.album_id; },
-  isTrack(id) { return this.mode === "local" && this.queue[this.index]?.id === id; },
+  albumId() { return this.mode === "browser" ? this.album?.id : this.sp?.album_id; },
+  playing() { return this.mode === "browser" ? !audio.paused : !!this.sp?.is_playing; },
+  isTrack(id) { return this.mode === "browser" && this.queue[this.index]?.id === id; },
 
   async playAlbum(album, index = 0, shuffle = false) {
+    if (!album.track_list?.length) { toast("This album has no playable tracks"); return; }
     if (album.source === "spotify") return this.playSpotify(album, index, shuffle);
     if (this.mode === "spotify" && this.sp?.is_playing) api("/api/spotify/control", { method: "POST", body: { action: "pause" } }).catch(() => {});
     this.stopPolling();
-    this.mode = "local"; this.album = album;
+    this.mode = "browser"; this.album = album;
     let q = album.track_list.slice();
     if (shuffle) { for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; } index = 0; }
     this.queue = q; this.index = index;
-    this.loadLocal(true);
-    closeSheets();
+    this.load(true);
   },
 
-  loadLocal(autoplay) {
+  load(autoplay) {
     const t = this.queue[this.index]; if (!t) return;
-    audio.src = `/api/local/stream/${t.id}`;
-    if (autoplay) audio.play().catch(err => toast("Tap play to start (" + err.message + ")"));
-    this.ui({ title: t.title, artist: t.artist || this.album.artist, art: this.album.art, playing: true, device: "This screen" });
+    audio.src = this.album.source === "demo" ? t.uri : `/api/local/stream/${encodeURIComponent(t.id)}`;
+    if (autoplay) audio.play().catch(err => { if (err.name !== "AbortError") toast("Tap play to start (" + err.message + ")"); });
+    const device = this.album.source === "demo" ? "This screen · preview" : "This screen";
+    this.ui({ title: t.title, artist: t.artist || this.album.artist, art: this.album.art, playing: true, device, pos: 0, dur: t.duration });
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist || this.album.artist, album: this.album.title,
-        artwork: this.album.art ? [{ src: new URL(this.album.art, location.href).href, sizes: "1000x1000", type: "image/jpeg" }] : [] });
+        artwork: this.album.art ? [{ src: new URL(this.album.art, location.href).href, sizes: "800x800", type: "image/jpeg" }] : [] });
     }
-    render();
+    setGlow(); updatePill(); renderSheetState();
   },
 
   async playSpotify(album, index, shuffle) {
-    if (this.mode === "local") audio.pause();
+    if (this.mode === "browser") audio.pause();
     this.mode = "spotify"; this.album = album;
     const device_id = await Sdk.deviceForPlay();
     let offset = index;
     if (shuffle) offset = Math.floor(Math.random() * Math.max(1, album.track_list.length));
     try {
       await api("/api/spotify/play", { method: "POST", body: { uri: album.uri, offset, device_id } });
-      closeSheets();
+      this.sp = { ...(this.sp || {}), album_id: album.id, is_playing: true };
       this.ui({ title: album.track_list[offset]?.title || album.title, artist: album.artist, art: album.art, playing: true });
       this.startPolling();
+      setGlow(); updatePill();
     } catch (err) {
       if (/device/i.test(err.message)) openDevices(album, index);
       toast(err.message, 5000);
@@ -239,32 +592,46 @@ const Player = {
   },
 
   toggle() {
-    if (this.mode === "local") { audio.paused ? audio.play() : audio.pause(); }
+    if (this.mode === "browser") { audio.paused ? audio.play() : audio.pause(); }
     else if (this.mode === "spotify") {
       const action = this.sp?.is_playing ? "pause" : "resume";
       if (this.sp) this.sp.is_playing = !this.sp.is_playing;
-      this.ui({ playing: this.sp?.is_playing });
+      this.ui({ playing: this.sp?.is_playing }); updatePill();
       api("/api/spotify/control", { method: "POST", body: { action } }).catch(e => toast(e.message)).finally(() => this.pollSoon());
     }
   },
+  stop() {
+    if (this.mode === "browser") { audio.pause(); }
+    else if (this.mode === "spotify" && this.sp?.is_playing) { this.sp.is_playing = false; api("/api/spotify/control", { method: "POST", body: { action: "pause" } }).catch(() => {}); }
+    this.stopPolling();
+    this.mode = null; this.album = null; this.sp = null;
+    $("#player").hidden = true;
+    setGlow(); render();
+  },
   next() {
-    if (this.mode === "local") { if (this.index < this.queue.length - 1) { this.index++; this.loadLocal(true); } }
+    if (this.mode === "browser") { if (this.index < this.queue.length - 1) { this.index++; this.load(true); } }
     else if (this.mode === "spotify") api("/api/spotify/control", { method: "POST", body: { action: "next" } }).catch(e => toast(e.message)).finally(() => this.pollSoon());
   },
   prev() {
-    if (this.mode === "local") {
-      if (audio.currentTime > 4 || this.index === 0) audio.currentTime = 0; else { this.index--; this.loadLocal(true); }
+    if (this.mode === "browser") {
+      if (audio.currentTime > 4 || this.index === 0) audio.currentTime = 0; else { this.index--; this.load(true); }
     } else if (this.mode === "spotify") api("/api/spotify/control", { method: "POST", body: { action: "previous" } }).catch(e => toast(e.message)).finally(() => this.pollSoon());
   },
 
-  ui({ title, artist, art, playing, device, progress }) {
-    $("#player").hidden = false;
+  ui({ title, artist, art, playing, device, pos, dur }) {
+    if ($("#player").hidden) { $("#player").hidden = false; requestAnimationFrame(render); }
     if (title !== undefined) $("#pTitle").textContent = title;
     if (artist !== undefined) $("#pArtist").textContent = artist;
     if (art !== undefined) $("#pCover").src = art || "";
-    if (playing !== undefined) $("#pToggle").textContent = playing ? "⏸" : "▶";
+    if (playing !== undefined) { $("#pToggle").innerHTML = icon(playing ? "pause" : "play"); }
     if (device !== undefined) $("#pDeviceName").textContent = device || "";
-    if (progress !== undefined) $("#pBar").style.width = Math.min(100, progress * 100) + "%";
+    if (dur !== undefined) $("#pDur").textContent = fmt(dur || 0);
+    if (pos !== undefined) {
+      $("#pPos").textContent = fmt(pos);
+      const d = dur ?? this._dur ?? 0;
+      $("#pBar").style.width = d ? Math.min(100, (pos / d) * 100) + "%" : "0";
+    }
+    if (dur !== undefined) this._dur = dur;
   },
 
   startPolling() { this.stopPolling(); this.poll(); this.pollT = setInterval(() => this.poll(), 3000); },
@@ -278,27 +645,31 @@ const Player = {
       const changedAlbum = s.album_id !== this.sp?.album_id;
       this.sp = s;
       this.ui({ title: s.track, artist: s.artist, art: s.image, playing: s.is_playing, device: s.device,
-        progress: s.duration_ms ? s.progress_ms / s.duration_ms : 0 });
-      if (changedAlbum) render();
+        pos: (s.progress_ms || 0) / 1000, dur: (s.duration_ms || 0) / 1000 });
+      if (changedAlbum && S.byId.has(s.album_id)) setOpen(s.album_id);
+      setGlow(); updatePill();
     } catch {}
   },
 };
 
-audio.addEventListener("ended", () => Player.next());
-audio.addEventListener("play", () => Player.mode === "local" && Player.ui({ playing: true }));
-audio.addEventListener("pause", () => Player.mode === "local" && Player.ui({ playing: false }));
-audio.addEventListener("timeupdate", () => Player.mode === "local" && audio.duration && Player.ui({ progress: audio.currentTime / audio.duration }));
-audio.addEventListener("error", () => { if (Player.mode === "local") { toast("Couldn't play this file in the browser, skipping"); setTimeout(() => Player.next(), 800); } });
+audio.addEventListener("ended", () => {
+  if (Player.index < Player.queue.length - 1) Player.next();
+  else { Player.ui({ playing: false }); updatePill(); renderSheetState(); }
+});
+audio.addEventListener("play", () => { if (Player.mode === "browser") { Player.ui({ playing: true }); updatePill(); } });
+audio.addEventListener("pause", () => { if (Player.mode === "browser") { Player.ui({ playing: false }); updatePill(); } });
+audio.addEventListener("timeupdate", () => Player.mode === "browser" && audio.duration && Player.ui({ pos: audio.currentTime, dur: audio.duration }));
+audio.addEventListener("error", () => { if (Player.mode === "browser" && audio.src) { toast("Couldn't play this track in the browser, skipping"); setTimeout(() => Player.next(), 800); } });
 $(".p-progress").addEventListener("click", e => {
-  if (Player.mode !== "local" || !audio.duration) return;
+  if (Player.mode !== "browser" || !audio.duration) return;
   const r = e.currentTarget.getBoundingClientRect();
   audio.currentTime = ((e.clientX - r.left) / r.width) * audio.duration;
 });
 $("#pToggle").onclick = () => Player.toggle();
 $("#pNext").onclick = () => Player.next();
 $("#pPrev").onclick = () => Player.prev();
-$("#pCover").onclick = () => { const id = Player.albumId(); if (id) openAlbum(id).catch(() => {}); };
-$("#pDevice").onclick = () => S.status?.spotify?.connected ? openDevices() : toast("Local music plays on this screen. Connect Spotify in Settings to pick other speakers.");
+$("#pCover").onclick = () => { const id = Player.albumId(); if (id && S.byId.has(id)) { setOpen(id); openSheet(id); } };
+$("#pDevice").onclick = () => S.status?.spotify?.connected ? openDevices() : toast("Local music and demo previews play on this screen. Connect Spotify in Settings to pick other speakers.");
 if ("mediaSession" in navigator) {
   navigator.mediaSession.setActionHandler("play", () => Player.toggle());
   navigator.mediaSession.setActionHandler("pause", () => Player.toggle());
@@ -380,14 +751,15 @@ function openSettings() {
   $("#settingsSheet").hidden = false;
   $("#showHidden").checked = store.get("showHidden", false);
   $("#spineNames").checked = store.get("spineNames", true);
+  $("#glowToggle").checked = store.get("glow", true);
   $("#sdkToggle").checked = Sdk.enabled();
-  $("#shelfH").value = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--shelf-h")) || 300;
+  $("#shape").value = store.get("shape", "bar");
   refreshStatus();
 }
 window.openSettings = openSettings;
 
 function renderStatus(st) {
-  const sp = st.spotify, lib = st.library;
+  const sp = st.spotify, lib = st.library, demo = st.demo;
   const spBtns = $("#spButtons"); spBtns.innerHTML = "";
   $("#spAdd").hidden = !sp.connected; $("#sdkRow").hidden = !sp.connected;
   if (!sp.configured) {
@@ -398,7 +770,7 @@ function renderStatus(st) {
   } else {
     $("#spStatus").textContent = sp.syncing ? `Syncing… ${sp.albums} albums` :
       `Connected · ${S.albums.filter(a => a.source === "spotify").length} albums` + (sp.error ? ` · last sync error: ${sp.error}` : "");
-    spBtns.innerHTML = `<button id="spSync">Sync saved albums</button><button id="spOff">Disconnect</button>`;
+    spBtns.innerHTML = `<button class="ghost" id="spSync">Sync saved albums</button><button class="ghost" id="spOff">Disconnect</button>`;
     $("#spSync").onclick = () => api("/api/spotify/sync", { method: "POST" }).then(watchStatus);
     $("#spOff").onclick = async () => { if (confirm("Disconnect Spotify and remove its albums from the shelf?")) { await api("/api/spotify/disconnect", { method: "POST" }); loadAlbums(); refreshStatus(); } };
   }
@@ -406,10 +778,28 @@ function renderStatus(st) {
     lib.scanning ? `${lib.phase}… ${lib.phase === "finding artwork" ? `${lib.art_done}/${lib.art_total}` : `${lib.files} files`}` :
     `${lib.albums} albums from ${lib.files} files in ${st.music_dir}` + (lib.last_scan ? ` · scanned ${new Date(lib.last_scan * 1000).toLocaleString()}` : "");
 
-  const busy = lib.scanning || sp.syncing;
+  const dBtns = $("#demoButtons");
+  if (demo.loading) { $("#demoStatus").textContent = `Loading… ${demo.albums} of ${demo.total} albums`; dBtns.innerHTML = ""; }
+  else if (demo.albums) {
+    $("#demoStatus").textContent = `${demo.albums} albums from the iTunes catalogue. Each track plays a 30-second preview on this screen.`;
+    dBtns.innerHTML = `<button class="ghost" id="demoRemove">Remove demo shelf</button>`;
+    $("#demoRemove").onclick = async () => {
+      if (Player.album?.source === "demo") Player.stop();
+      if (S.byId.get(S.openId)?.source === "demo") S.openId = null;
+      await api("/api/demo", { method: "DELETE" }); await loadAlbums(); refreshStatus();
+    };
+  } else {
+    $("#demoStatus").textContent = (demo.error ? `Last attempt failed: ${demo.error}. ` : "") +
+      `Fills the shelf with ${demo.total} well-known albums and their 30-second previews, so you can try Spine without an account.`;
+    dBtns.innerHTML = `<button class="ghost" id="demoLoad2">Load demo shelf</button>`;
+    $("#demoLoad2").onclick = loadDemo;
+  }
+
+  const busy = lib.scanning || sp.syncing || demo.loading;
   const t = $("#scanToast");
   t.hidden = !busy;
-  if (busy) t.textContent = lib.scanning ? `Library: ${lib.phase}${lib.art_total ? ` ${lib.art_done}/${lib.art_total}` : ""}` : `Spotify: syncing ${sp.albums} albums`;
+  if (busy) t.textContent = demo.loading ? `Demo shelf: ${demo.albums} of ${demo.total} albums` :
+    lib.scanning ? `Library: ${lib.phase}${lib.art_total ? ` ${lib.art_done}/${lib.art_total}` : ""}` : `Spotify: syncing ${sp.albums} albums`;
 }
 
 async function refreshStatus() {
@@ -422,12 +812,18 @@ function watchStatus() {
   let wasBusy = true, ticks = 0;
   watchT = setInterval(async () => {
     const st = await refreshStatus(); if (!st) return;
-    const busy = st.library.scanning || st.spotify.syncing;
-    if (++ticks % 5 === 0 && busy) loadAlbums();   // show progress on the shelf while scanning
+    const busy = st.library.scanning || st.spotify.syncing || st.demo.loading;
+    if (++ticks % 3 === 0 && busy) loadAlbums();   // show progress on the shelf while loading
     if (!busy && wasBusy) { clearInterval(watchT); watchT = null; loadAlbums(); }
     wasBusy = busy;
   }, 1500);
 }
+
+async function loadDemo() {
+  try { await api("/api/demo/load", { method: "POST" }); toast("Loading the demo shelf…"); watchStatus(); refreshStatus(); }
+  catch (e) { toast(e.message); }
+}
+$("#demoLoadBtn").onclick = loadDemo;
 
 $("#settingsBtn").onclick = openSettings;
 $("#rescanBtn").onclick = () => api("/api/library/rescan", { method: "POST" }).then(watchStatus);
@@ -439,14 +835,17 @@ $("#spAddBtn").onclick = async () => {
 $("#sdkToggle").onchange = e => { store.set("sdk", e.target.checked); if (e.target.checked) Sdk.load(); else store.set("device", null); };
 $("#showHidden").onchange = e => { store.set("showHidden", e.target.checked); loadAlbums(); };
 $("#spineNames").onchange = e => { store.set("spineNames", e.target.checked); render(); };
-$("#shelfH").oninput = e => { store.set("shelfH", +e.target.value); render(); };
+$("#glowToggle").onchange = e => { store.set("glow", e.target.checked); setGlow(); };
+$("#shape").onchange = e => { store.set("shape", e.target.value); render(); };
 
 /* ======================================================== top bar */
 
-$$("#sourceSeg button").forEach(b => {
-  b.classList.toggle("on", b.dataset.source === S.source);
-  b.onclick = () => { S.source = b.dataset.source; store.set("source", S.source); $$("#sourceSeg button").forEach(x => x.classList.toggle("on", x === b)); render(); };
-});
+function setSource(src) {
+  S.source = src; store.set("source", src);
+  $$("#sourceSeg button").forEach(x => x.classList.toggle("on", x.dataset.source === src));
+}
+$$("#sourceSeg button").forEach(b => { b.onclick = () => { setSource(b.dataset.source); render(); }; });
+setSource(S.source);
 $("#sort").value = S.sort;
 $("#sort").onchange = e => { S.sort = e.target.value; store.set("sort", S.sort); render(); };
 let searchT;
@@ -456,7 +855,7 @@ function closeSheets() { $$(".sheet").forEach(s => (s.hidden = true)); }
 document.addEventListener("click", e => { if (e.target.closest("[data-close]")) closeSheets(); });
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeSheets();
-  if (e.key === " " && !e.target.matches("input,select,textarea")) { e.preventDefault(); Player.toggle(); }
+  if (e.key === " " && !e.target.matches("input,select,textarea,button")) { e.preventDefault(); Player.toggle(); }
 });
 
 /* ======================================================== wall mode (kiosk) */
@@ -481,7 +880,7 @@ function peek() {
   clearTimeout(peekT); peekT = setTimeout(() => document.body.classList.remove("peek"), 5000);
 }
 $("#wallBtn").onclick = () => setWall(!document.body.classList.contains("wallmode"));
-$("#wall").addEventListener("click", e => { if (!e.target.closest(".spine")) peek(); });
+$("#room").addEventListener("click", e => { if (!e.target.closest(".spine")) peek(); });
 $("#player").addEventListener("click", peek);
 document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && document.body.classList.contains("wallmode")) setWall(false); });
 document.addEventListener("visibilitychange", async () => {
@@ -491,8 +890,11 @@ document.addEventListener("visibilitychange", async () => {
   }
 });
 
-let resizeT;
-addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(render, 150); });
+let lastSize = "";
+new ResizeObserver(() => {
+  const size = `${$("#room").clientWidth}x${$("#room").clientHeight}`;
+  if (size !== lastSize) { lastSize = size; render(); }
+}).observe($("#room"));
 
 /* ======================================================== boot */
 
@@ -504,7 +906,7 @@ addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(r
 
   await loadAlbums();
   const st = await refreshStatus();
-  if (st && (st.library.scanning || st.spotify.syncing || params.get("spotify"))) watchStatus();
+  if (st && (st.library.scanning || st.spotify.syncing || st.demo.loading || params.get("spotify"))) watchStatus();
   if (st?.spotify.connected) {
     if (Sdk.enabled()) Sdk.load();
     try {   // pick up whatever is already playing on Spotify

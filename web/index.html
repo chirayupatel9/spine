@@ -3,62 +3,111 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="theme-color" content="#17171b">
+  <meta name="theme-color" content="#0c0a08">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Spine</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300&display=swap">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 6l8.5 6L6 18zM16 6h2.2v12H16z" fill="currentColor"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M18 6l-8.5 6L18 18zM5.8 6H8v12H5.8z" fill="currentColor"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M4 7h3.5c2 0 3.2 1 4.3 2.7l2.4 4.6c.9 1.7 2 2.7 4 2.7H20M4 17h3.5c1.6 0 2.6-.6 3.4-1.7M14.6 8.7C15.4 7.6 16.4 7 18 7h2M17.5 4.5 20 7l-2.5 2.5M17.5 14.5 20 17l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-wall" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-speaker" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="14" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="7.2" r="1" fill="currentColor"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="19" cy="12" r="1.7" fill="currentColor"/></symbol>
+  </svg>
+
   <header id="topbar">
     <div class="brand">SPINE</div>
-    <nav class="seg" id="sourceSeg">
+    <nav class="seg" id="sourceSeg" aria-label="Source">
       <button data-source="all" class="on">All</button>
       <button data-source="spotify">Spotify</button>
       <button data-source="local">Local</button>
+      <button data-source="demo" hidden>Demo</button>
     </nav>
-    <input id="search" type="search" placeholder="Search" autocomplete="off">
-    <select id="sort" aria-label="Sort">
-      <option value="artist">Artist</option>
-      <option value="added">Recently added</option>
-      <option value="title">Title</option>
-      <option value="year">Year</option>
-      <option value="color">Colour</option>
-    </select>
-    <button class="icon" id="wallBtn" title="Wall mode (fullscreen)">⤢</button>
-    <button class="icon" id="settingsBtn" title="Settings">⚙</button>
+    <div class="grow"></div>
+    <label class="search"><svg><use href="#i-search"/></svg><input id="search" type="search" placeholder="Find an album" autocomplete="off"></label>
+    <label class="arrange">Arrange
+      <select id="sort" aria-label="Arrange by">
+        <option value="artist">By artist</option>
+        <option value="decade">By decade</option>
+        <option value="added">Recently added</option>
+        <option value="title">By title</option>
+        <option value="color">By colour</option>
+        <option value="manual">Manual order</option>
+      </select>
+    </label>
+    <button class="icon" id="wallBtn" title="Wall mode (fullscreen)"><svg><use href="#i-wall"/></svg></button>
+    <button class="icon" id="settingsBtn" title="Settings"><svg><use href="#i-gear"/></svg></button>
   </header>
 
-  <main id="wall">
-    <div id="shelves"></div>
-    <div id="empty" hidden>
-      <h2>Your shelf is empty</h2>
-      <p>Connect Spotify or put music in your library folder, then open Settings.</p>
-      <button class="primary" onclick="openSettings()">Open settings</button>
+  <main id="room">
+    <div id="device">
+      <div id="screen">
+        <div id="row" role="list" aria-label="Albums"></div>
+        <div id="empty" hidden>
+          <h2>Your collection, back on the wall.</h2>
+          <p>Load the demo shelf, connect Spotify, or point Spine at a music folder.</p>
+          <div class="row center">
+            <button class="primary" id="demoLoadBtn">Load demo shelf</button>
+            <button class="ghost" onclick="openSettings()">Settings</button>
+          </div>
+        </div>
+        <div class="glass" aria-hidden="true"></div>
+      </div>
+      <i class="power" aria-hidden="true"></i>
     </div>
+    <nav id="index" aria-label="Jump to"></nav>
+    <p id="hint"></p>
     <div id="scanToast" hidden></div>
   </main>
 
-  <!-- album pulled off the shelf -->
+  <footer id="player" hidden>
+    <img id="pCover" alt="">
+    <div class="p-meta">
+      <div id="pTitle"></div>
+      <div id="pArtist"></div>
+    </div>
+    <div class="p-ctrl">
+      <button class="icon" id="pPrev" title="Previous"><svg><use href="#i-prev"/></svg></button>
+      <button class="icon big" id="pToggle" title="Play/pause"><svg><use href="#i-pause"/></svg></button>
+      <button class="icon" id="pNext" title="Next"><svg><use href="#i-next"/></svg></button>
+    </div>
+    <div class="p-time"><span id="pPos">0:00</span><div class="p-progress"><div id="pBar"></div></div><span id="pDur">0:00</span></div>
+    <button class="device" id="pDevice" title="Choose speaker"><svg><use href="#i-speaker"/></svg><span id="pDeviceName"></span></button>
+  </footer>
+
+  <!-- album details (tap the open cover) -->
   <div id="albumSheet" class="sheet" hidden>
     <div class="sheet-bg" data-close></div>
     <div class="album-card">
-      <button class="close icon" data-close>✕</button>
+      <button class="close icon" data-close title="Close"><svg><use href="#i-close"/></svg></button>
       <div class="cover-wrap"><img id="aCover" alt=""></div>
       <div class="album-info">
         <div class="src-badge" id="aSource"></div>
         <h2 id="aTitle"></h2>
         <div class="artist" id="aArtist"></div>
         <div class="actions">
-          <button class="primary" id="aPlay">▶ Play</button>
-          <button id="aShuffle">Shuffle</button>
-          <button id="aMore" class="icon" title="More">⋯</button>
+          <button class="primary" id="aPlay"><svg><use href="#i-play"/></svg><span>Play</span></button>
+          <button class="ghost" id="aShuffle"><svg><use href="#i-shuffle"/></svg><span>Shuffle</span></button>
+          <button class="ghost" id="aPutBack">Put back</button>
+          <button id="aMore" class="icon" title="More"><svg><use href="#i-more"/></svg></button>
         </div>
         <div id="aMenu" class="menu" hidden>
-          <button id="aFixArt">Fix artwork</button>
-          <button id="aHide">Hide from shelf</button>
+          <button class="ghost" id="aFixArt">Fix artwork</button>
+          <button class="ghost" id="aHide">Hide from shelf</button>
         </div>
         <form id="artForm" hidden>
           <div class="hint">Search covers online with corrected names, or upload an image.</div>
@@ -80,7 +129,7 @@
   <div id="settingsSheet" class="sheet" hidden>
     <div class="sheet-bg" data-close></div>
     <div class="panel">
-      <button class="close icon" data-close>✕</button>
+      <button class="close icon" data-close title="Close"><svg><use href="#i-close"/></svg></button>
       <h2>Settings</h2>
 
       <section>
@@ -89,7 +138,7 @@
         <div class="row" id="spButtons"></div>
         <div id="spAdd" class="row" hidden>
           <input id="spLink" placeholder="Add album by Spotify link">
-          <button id="spAddBtn">Add</button>
+          <button class="ghost" id="spAddBtn">Add</button>
         </div>
         <label class="check" id="sdkRow" hidden><input type="checkbox" id="sdkToggle"> Use this screen as a Spotify speaker (desktop browsers)</label>
       </section>
@@ -98,16 +147,29 @@
         <h3>Local library</h3>
         <div id="libStatus" class="hint"></div>
         <div class="row">
-          <button id="rescanBtn">Rescan folder</button>
-          <button id="refetchBtn">Re-find all artwork</button>
+          <button class="ghost" id="rescanBtn">Rescan folder</button>
+          <button class="ghost" id="refetchBtn">Re-find all artwork</button>
         </div>
       </section>
 
       <section>
-        <h3>Shelf</h3>
+        <h3>Demo shelf</h3>
+        <div id="demoStatus" class="hint"></div>
+        <div class="row" id="demoButtons"></div>
+      </section>
+
+      <section>
+        <h3>Display</h3>
+        <label class="field">Shape
+          <select id="shape">
+            <option value="bar">Stretched bar (28″ wall display)</option>
+            <option value="wide">Wide</option>
+            <option value="fill">Fill the window</option>
+          </select>
+        </label>
         <label class="check"><input type="checkbox" id="showHidden"> Show hidden albums</label>
-        <label class="range">Shelf height <input type="range" id="shelfH" min="180" max="520" step="10"></label>
         <label class="check"><input type="checkbox" id="spineNames" checked> Show text on spines</label>
+        <label class="check"><input type="checkbox" id="glowToggle" checked> Glow the wall in the playing album's colour</label>
       </section>
     </div>
   </div>
@@ -116,28 +178,13 @@
   <div id="deviceSheet" class="sheet" hidden>
     <div class="sheet-bg" data-close></div>
     <div class="panel small">
-      <button class="close icon" data-close>✕</button>
+      <button class="close icon" data-close title="Close"><svg><use href="#i-close"/></svg></button>
       <h2>Play on</h2>
       <div id="deviceList"></div>
       <div class="hint">Don't see your device? Open Spotify on it once, then refresh.</div>
-      <button id="devRefresh">Refresh</button>
+      <div class="row"><button class="ghost" id="devRefresh">Refresh</button></div>
     </div>
   </div>
-
-  <footer id="player" hidden>
-    <img id="pCover" alt="">
-    <div class="p-meta">
-      <div id="pTitle"></div>
-      <div id="pArtist"></div>
-      <div class="p-progress"><div id="pBar"></div></div>
-    </div>
-    <div class="p-ctrl">
-      <button class="icon" id="pPrev">⏮</button>
-      <button class="icon big" id="pToggle">⏸</button>
-      <button class="icon" id="pNext">⏭</button>
-    </div>
-    <button class="device" id="pDevice" title="Choose speaker">🔈 <span id="pDeviceName"></span></button>
-  </footer>
 
   <audio id="audio" preload="auto"></audio>
   <div id="toast" hidden></div>

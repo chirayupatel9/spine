@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import hashlib
 import hmac
 import logging
@@ -13,7 +14,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import artwork, db, library, spotify
+from . import artwork, db, demo, library, spotify
 from .config import APP_PASSWORD, ART_DIR, MUSIC_DIR, PUBLIC_URL, RESCAN_MINUTES, SECRET_KEY, SPOTIFY_REDIRECT_URI
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -117,17 +118,33 @@ def _album_out(a: dict) -> dict:
     }
 
 
+def _order() -> list[str]:
+    try:
+        return json.loads(db.kv_get("order") or "[]")
+    except ValueError:
+        return []
+
+
 @app.get("/api/albums")
 def list_albums(source: str | None = None, include_hidden: bool = False):
     sql = """SELECT a.*, (SELECT COUNT(*) FROM tracks t WHERE t.album_id=a.id) AS n_tracks FROM albums a WHERE 1=1"""
     args: list = []
-    if source in ("local", "spotify"):
+    if source in ("local", "spotify", "demo"):
         sql += " AND source=?"
         args.append(source)
     if not include_hidden:
         sql += " AND hidden=0"
     sql += " ORDER BY artist COLLATE NOCASE, year, title COLLATE NOCASE"
-    return [_album_out(a) for a in db.query(sql, args)]
+    pos = {aid: i for i, aid in enumerate(_order())}
+    return [{**_album_out(a), "pos": pos.get(a["id"])} for a in db.query(sql, args)]
+
+
+@app.put("/api/order")
+def save_order(body: dict = Body(...)):
+    """Manual shelf order (the 'Manual order' arrangement), shared by every screen."""
+    ids = [str(i) for i in body.get("ids", [])][:20000]
+    db.kv_set("order", json.dumps(ids))
+    return {"ok": True, "count": len(ids)}
 
 
 @app.get("/api/albums/{album_id}")
@@ -197,6 +214,7 @@ def status():
     return {
         "library": library.status,
         "music_dir": str(MUSIC_DIR),
+        "demo": {**demo.status, "albums": demo.count()},
         "spotify": {"configured": spotify.configured(), "connected": spotify.connected(),
                     "redirect_uri": SPOTIFY_REDIRECT_URI, **spotify.sync_status},
     }
@@ -217,6 +235,19 @@ def stream(track_id: str):
         raise HTTPException(404)
     mt = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return FileResponse(path, media_type=mt)  # supports HTTP Range (seeking)
+
+
+# ---------------------------------------------------------------- demo shelf
+
+@app.post("/api/demo/load")
+def demo_load():
+    return {"started": demo.start_load()}
+
+
+@app.delete("/api/demo")
+def demo_remove():
+    demo.remove()
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- spotify

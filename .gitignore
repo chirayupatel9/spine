@@ -3,3 +3,4 @@ data/
 music/
 __pycache__/
 *.pyc
+.venv/

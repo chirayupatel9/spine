@@ -1,14 +1,14 @@
 {
   "name": "Spine",
   "short_name": "Spine",
-  "description": "Your albums as spines on a shelf — Spotify and your own music.",
+  "description": "Your albums as a row of spines on the wall: Spotify, your own music, or the demo shelf.",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
   "display_override": ["fullscreen", "standalone"],
   "orientation": "any",
-  "background_color": "#121215",
-  "theme_color": "#17171b",
+  "background_color": "#0c0a08",
+  "theme_color": "#0c0a08",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
