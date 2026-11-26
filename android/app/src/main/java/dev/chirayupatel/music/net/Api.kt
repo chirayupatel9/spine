@@ -74,6 +74,22 @@ data class AlbumDetail(
 @Serializable data class SpotifyStatus(val configured: Boolean = false, val connected: Boolean = false)
 @Serializable data class Status(val demo: DemoStatus = DemoStatus(), val spotify: SpotifyStatus = SpotifyStatus())
 
+/** What Spotify is playing, as the server reports it (all empty when nothing is). */
+@Serializable
+data class SpotifyState(
+    @SerialName("is_playing") val isPlaying: Boolean? = null,
+    @SerialName("progress_ms") val progressMs: Long? = null,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+    val track: String? = null,
+    val artist: String? = null,
+    @SerialName("album_id") val albumId: String? = null,
+    val album: String? = null,
+    val image: String? = null,
+    val device: String? = null,
+    val shuffle: Boolean? = null,
+    val repeat: String? = null,
+)
+
 class NotSignedIn : IOException("Not signed in")
 class ServerError(message: String) : IOException(message)
 
@@ -174,7 +190,16 @@ class Api(context: Context) {
     suspend fun loadDemo() = post("/api/demo/load")
     suspend fun spotifyPlay(uri: String?, offset: Int) =
         post("/api/spotify/play", buildJsonObject { put("uri", uri); put("offset", offset) }.toString())
-    suspend fun spotifyControl(action: String) = post("/api/spotify/control", buildJsonObject { put("action", action) }.toString())
+    /** pause, resume, next, previous; seek (value: ms), shuffle (value: on/off), repeat (value: off, context, track). */
+    suspend fun spotifyControl(action: String, value: Any? = null) = post("/api/spotify/control", buildJsonObject {
+        put("action", action)
+        when (value) {
+            is Boolean -> put("value", value)
+            is Number -> put("value", value)
+            is String -> put("value", value)
+        }
+    }.toString())
+    suspend fun spotifyState(): SpotifyState = json.decodeFromString(getText("/api/spotify/state"))
 
     /** The manual shelf order, shared by every screen (the web app reads the same list). */
     suspend fun saveOrder(ids: List<String>) =

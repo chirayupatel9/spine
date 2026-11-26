@@ -13,7 +13,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,7 +26,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -59,10 +63,16 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.chirayupatel.music.net.Album
 
+/** How far the playing album's slot widens for its record, in shelf widths (as on the web). */
+const val OUT_WALL = 1.62f
+const val OUT_STACK = 1.42f   // the phone stack: the record comes out downwards, a little less
+
 /**
  * One album on the shelf. `vertical` = the phone stack (spines are horizontal strips, text reads
  * across); otherwise the wall shelf (upright spines, text runs down). `cross` is the shelf's size
- * across: an open album becomes a square that size, its cover sliding out as it opens.
+ * across: an open album becomes a square that size, its cover sliding out as it opens. When it is
+ * also the album playing (`out`), its slot widens and the record slides out of the sleeve into it,
+ * turning while it plays; touching the record pauses it. The spine under your finger lifts.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -79,8 +89,18 @@ fun Spine(
     modifier: Modifier = Modifier,
     onHold: (() -> Unit)? = null,   // hold to start dragging it to a new place
     lifted: Boolean = false,        // being dragged right now
+    out: Boolean = false,           // open and playing: its record is out of the sleeve
+    onRecordTap: () -> Unit = {},
 ) {
-    val size by animateDpAsState(if (open) cross else thickness, tween(OPEN_MS, easing = OpenEasing), label = "spine")
+    val opened by animateDpAsState(if (open) cross else thickness, tween(OPEN_MS, easing = OpenEasing), label = "spine")
+    // The record comes out once the album has opened, and goes back in with it.
+    val outFrac by animateFloatAsState(
+        if (open && out) 1f else 0f,
+        if (open && out) tween(OPEN_MS, delayMillis = 260, easing = OpenEasing) else tween(OPEN_MS, easing = OpenEasing),
+        label = "out",
+    )
+    val reach = (if (vertical) OUT_STACK else OUT_WALL) - 1f
+    val extent = opened + cross * (reach * outFrac)
     val base = remember(a.color) { parseColor(a.color) }
     val ink = remember(a.textColor) { parseColor(a.textColor, Color(0xFFF4F1EA)) }
     val h = remember(a.id, a.title) { spineHash(a.id + a.title) }
@@ -88,6 +108,9 @@ fun Spine(
     val serif = h % 5 == 1L
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val touched = (pressed || hovered) && !open && !lifted
+    val lift by animateFloatAsState(if (touched) 1f else 0f, tween(if (touched) 140 else 240, easing = OutEasing), label = "lift")
     // Each animation uses the timing of the way *into* its state: the cover comes in, the label
     // waits for it to leave before returning.
     val labelAlpha by animateFloatAsState(if (open) 0f else 1f, if (open) tween(120) else tween(220, delayMillis = 140, easing = OutEasing), label = "label")
@@ -100,10 +123,14 @@ fun Spine(
 
     Box(
         modifier
-            .then(if (vertical) Modifier.fillMaxWidth().height(size) else Modifier.fillMaxHeight().width(size))
+            .then(if (vertical) Modifier.fillMaxWidth().height(extent) else Modifier.fillMaxHeight().width(extent))
+            .graphicsLayer {   // lifted out of the shelf: sideways in the stack, upwards on the wall
+                if (vertical) translationX = -lift * size.width * .05f else translationY = -lift * size.height * .06f
+            }
             .clipToBounds()
-            .drawBehind { drawSpine(base, ink, vertical, band, cross.toPx(), pressed || lifted) }
+            .drawBehind { if (outFrac <= 0f || coverAlpha < 1f) drawSpine(base, ink, vertical, band, cross.toPx(), pressed || lifted) }
             .then(if (lifted) Modifier.border(2.dp, Palette.Accent) else Modifier)
+            .hoverable(interaction)
             .combinedClickable(interactionSource = interaction, indication = null, onClick = onTap, onLongClick = onHold, onLongClickLabel = "Move")
             .semantics { contentDescription = "${a.artist}, ${a.title}" },
     ) {
@@ -145,6 +172,19 @@ fun Spine(
                 )
             }
         }
+        if (outFrac > 0f) {
+            Vinyl(
+                artUrl, base, spinning = out && playing, onTap = onRecordTap,
+                modifier = Modifier.align(Alignment.TopStart).offset(cross * .03f, cross * .03f).size(cross * .94f)
+                    .graphicsLayer {
+                        val d = outFrac * reach * cross.toPx()
+                        if (vertical) translationY = d else translationX = d
+                    },
+            )
+        }
+        // The sleeve: fills the slot while the album opens, then stays a square as the slot widens.
+        val sleeve = if (extent < cross) extent else cross
+        Box(Modifier.align(Alignment.TopStart).then(if (vertical) Modifier.fillMaxWidth().height(sleeve) else Modifier.fillMaxHeight().width(sleeve))) {
         if (coverAlpha > 0f) {
             if (artUrl != null) {
                 AsyncImage(
@@ -173,6 +213,7 @@ fun Spine(
                 if (pill != "Tap for tracks") Eq(playing)
                 Text(pill, color = Color.White.copy(alpha = .92f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
+        }
         }
     }
 }

@@ -33,4 +33,7 @@ object AvIcons {
     val Search = icon("search", stroke = listOf("M16.5 10.5a6 6 0 1 1-12 0a6 6 0 1 1 12 0", "M15 15l5 5"))
     val Close = icon("close", stroke = listOf("M6 6l12 12M18 6 6 18"))
     val Chevron = icon("chevron", stroke = listOf("M7 10l5 5 5-5"))
+    val Down = icon("down", stroke = listOf("M6 9.5l6 6 6-6"))
+    val List = icon("list", stroke = listOf("M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"))
+    val Repeat = icon("repeat", stroke = listOf("M4.5 10.5V9.5a3 3 0 0 1 3-3h11M15.5 3.5l3 3-3 3M19.5 13.5v1a3 3 0 0 1-3 3h-11M8.5 20.5l-3-3 3-3"))
 }

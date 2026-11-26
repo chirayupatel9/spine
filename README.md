@@ -137,9 +137,10 @@ Keep `data/` backed up: it holds the database (saved order, hidden albums, Spoti
 
 ## Android app
 `android/` is a native Android app (Kotlin and Jetpack Compose) that talks to your server:
-- **Phones:** the vertical stack of spines with momentum scrolling and an A–Z rail you slide along. Tap a spine to open it into its cover and play it. Hold one, then drag it to rearrange the shelf. The order is saved on the server, so every screen shares it; holding an album while another arrangement is showing switches to your own order, starting from what's on screen.
+- **Phones:** the vertical stack of spines with momentum scrolling and an A–Z rail you slide along (in orders without letters, a handle you drag). The spine under your finger lifts. Tap a spine to open it into its cover and play it; its record slides out of the sleeve and turns while it plays. Hold one, then drag it to rearrange the shelf. The order is saved on the server, so every screen shares it; holding an album while another arrangement is showing switches to your own order, starting from what's on screen.
 - **Tablets and landscape:** the wall shelf in its bezel.
-- **Playback:** local and demo albums play in a background service (Media3), with lock-screen and notification controls, artwork, a draggable position bar, and Bluetooth and headphone buttons. Spotify albums are started on your Spotify device through the server.
+- **Now playing:** tap the player bar, or swipe it up, for the full-screen player: the cover and its spinning record, a seek bar, shuffle, repeat (the album or one track) and Up next. Swipe down or press Back to put it away.
+- **Playback:** local and demo albums play in a background service (Media3), with lock-screen and notification controls, artwork, a draggable position bar, and Bluetooth and headphone buttons. Spotify albums are played on your Spotify device through the server, and the app follows what Spotify is playing while it's on screen.
 - **Instant start:** it opens on the last shelf it saw, then refreshes.
 - **Sign-in:** your server's address and password, kept in the app's private storage (it uses the same sign-in cookie as the web app).
 

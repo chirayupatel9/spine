@@ -44,6 +44,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Spotify's state is only asked for while the app is on screen.
+    override fun onStart() { super.onStart(); vm.onForeground(true) }
+    override fun onStop() { vm.onForeground(false); super.onStop() }
+
     /** Wall mode: no system bars, and the screen stays awake. */
     private fun applyWallMode(on: Boolean) {
         val c = WindowCompat.getInsetsController(window, window.decorView)

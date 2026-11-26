@@ -65,9 +65,9 @@ fun AlbumSheet(vm: AppViewModel) {
                     Text(a.artist + (a.year?.let { " · $it" } ?: ""), color = Palette.Muted, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp, bottom = 18.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PrimaryButton(if (mine && vm.isPlaying) "Pause" else if (mine) "Resume" else "Play") {
-                            if (mine) vm.toggle() else { vm.openId = a.id; vm.play(a.id, 0) }
+                            if (mine) vm.toggle() else { vm.openId = a.id; vm.play(a.id) }
                         }
-                        GhostButton("Shuffle") { vm.openId = a.id; vm.play(a.id, 0, shuffle = true) }
+                        GhostButton("Shuffle") { vm.openId = a.id; vm.play(a.id, shuffle = true) }
                         if (vm.openId == a.id) GhostButton("Put back") { vm.putBack() }
                     }
                     HorizontalDivider(color = Palette.Line, modifier = Modifier.padding(top = 20.dp))

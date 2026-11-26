@@ -8,12 +8,15 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -49,6 +52,15 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        // Shuffle from the track playing now: it comes first and every other track follows once.
+        // (Left alone, the player shuffles the whole album and starts part-way through that order,
+        // so the tracks before it there would never play.)
+        player.addListener(object : Player.Listener {
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { if (shuffleModeEnabled) shuffleFromCurrent(player) }
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED && player.shuffleModeEnabled) shuffleFromCurrent(player)
+            }
+        })
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -60,6 +72,15 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+
+    private fun shuffleFromCurrent(p: ExoPlayer) {
+        val n = p.mediaItemCount
+        if (n < 2) return
+        val cur = p.currentMediaItemIndex
+        if (p.currentTimeline.getFirstWindowIndex(true) == cur) return   // already starts here
+        val rest = (0 until n).filter { it != cur }.shuffled()
+        p.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(intArrayOf(cur) + rest.toIntArray(), System.nanoTime()))
+    }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val p = session?.player

@@ -15,7 +15,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -66,13 +68,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -91,9 +96,14 @@ import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.chirayupatel.music.R
+import dev.chirayupatel.music.net.Album
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.max
+import kotlin.math.min as minOf2
 
 @Composable
 fun ShelfScreen(vm: AppViewModel) {
@@ -140,6 +150,7 @@ fun ShelfScreen(vm: AppViewModel) {
                 if (vm.nowTitle.isEmpty() && !vm.wallMode) Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
             }
         }
+        NowPlaying(vm)
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
     }
     AlbumSheet(vm)
@@ -180,9 +191,9 @@ private fun TopBar(vm: AppViewModel, wide: Boolean) {
 private fun Brand() = Text("ALBUM VIEWER", color = Palette.Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp, letterSpacing = .14.em, maxLines = 1)
 
 @Composable
-fun IconButton(icon: ImageVector, label: String, tint: Color = Palette.Muted, size: Dp = 44.dp, onClick: () -> Unit) {
+fun IconButton(icon: ImageVector, label: String, tint: Color = Palette.Muted, size: Dp = 44.dp, iconSize: Dp = 20.dp, onClick: () -> Unit) {
     Box(Modifier.size(size).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Icon(icon, label, tint = tint, modifier = Modifier.size(20.dp))
+        Icon(icon, label, tint = tint, modifier = Modifier.size(iconSize))
     }
 }
 
@@ -274,6 +285,8 @@ private fun VerticalStack(vm: AppViewModel) {
                             onTap = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.tap(a) },
                             onHold = { reorder.begin(a, list) },
                             lifted = a.id == reorder.key,
+                            out = a.id == vm.openId && a.id == vm.nowAlbumId && vm.nowTitle.isNotEmpty(),
+                            onRecordTap = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.toggle() },
                             modifier = if (a.id == reorder.key) Modifier.held(reorder, a.id, vertical = true) else Modifier.animateItem(),
                         )
                     }
@@ -284,19 +297,22 @@ private fun VerticalStack(vm: AppViewModel) {
         Rail(vm, state, Modifier.width(36.dp).fillMaxHeight())
     }
 
-    // Put the opened album's top where the finished square will sit centred; it grows into place.
-    LaunchedEffect(vm.openId) {
+    // Put the opened album's top where its finished slot will sit centred (a square, or taller with
+    // the record out); it grows into place.
+    val outNow = vm.openId != null && vm.openId == vm.nowAlbumId && vm.nowTitle.isNotEmpty()
+    LaunchedEffect(vm.openId, outNow) {
         val i = list.indexOfFirst { it.id == vm.openId }
         if (i < 0) return@LaunchedEffect
         val vp = state.layoutInfo.viewportSize.height
-        state.animateScrollToItem(i, -((vp - crossPx) / 2).coerceAtLeast(0))
+        val slot = if (outNow) (crossPx * OUT_STACK).toInt() else crossPx
+        state.animateScrollToItem(i, -((vp - slot) / 2).coerceAtLeast(0))
     }
 }
 
 @Composable
 private fun Rail(vm: AppViewModel, state: LazyListState, modifier: Modifier) {
     val keys = vm.railKeys
-    if (keys.isEmpty()) { Spacer(modifier); return }
+    if (keys.isEmpty()) { ScrollHandle(vm, state, modifier); return }
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -335,8 +351,8 @@ private fun Rail(vm: AppViewModel, state: LazyListState, modifier: Modifier) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             keys.forEachIndexed { i, (k, _) ->
                 Box(Modifier.height(itemH).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(shortKey(k), fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
-                        color = if (i == (active ?: current)) (if (active != null) Color.White else Palette.Accent) else Palette.Faint)
+                    Text(shortKey(k), fontSize = 10.5.sp, fontWeight = FontWeight.Bold,
+                        color = if (i == (active ?: current)) (if (active != null) Color.White else Palette.Accent) else Color.White.copy(alpha = .62f))
                 }
             }
         }
@@ -352,6 +368,111 @@ private fun Rail(vm: AppViewModel, state: LazyListState, modifier: Modifier) {
 }
 
 private fun shortKey(k: String) = if (Regex("^\\d{4}s$").matches(k)) "’" + k.substring(2) else k
+
+/** Where the stack is scrolled to (0 to 1) and how much of it is in view, from the albums on screen. */
+private class StackMetrics(val fraction: Float, val share: Float, val avg: Float, val viewport: Float)
+
+private fun stackMetrics(state: LazyListState): StackMetrics {
+    val info = state.layoutInfo
+    val items = info.visibleItemsInfo
+    val vp = (info.viewportEndOffset - info.viewportStartOffset).toFloat()
+    if (items.isEmpty() || info.totalItemsCount == 0 || vp <= 0f) return StackMetrics(0f, 1f, 1f, vp)
+    val avg = items.sumOf { it.size }.toFloat() / items.size
+    val total = avg * info.totalItemsCount
+    val first = items.first()
+    val fraction = when {
+        !state.canScrollBackward -> 0f
+        !state.canScrollForward -> 1f
+        else -> ((first.index * avg - first.offset) / (total - vp).coerceAtLeast(1f)).coerceIn(0f, 1f)
+    }
+    return StackMetrics(fraction, (vp / total).coerceIn(.05f, 1f), avg, vp)
+}
+
+/** What the bubble says about an album while you drag the handle. */
+private fun bubbleKey(a: Album, sort: Sort): String = when (sort) {
+    Sort.COLOR -> a.color
+    Sort.ADDED -> a.addedAt?.let { SimpleDateFormat("MMM yyyy", Locale.getDefault()).format(Date((it * 1000).toLong())) } ?: "Undated"
+    else -> artistKey(a.artist).firstOrNull()?.uppercaseChar()?.let { if (it in 'A'..'Z') it.toString() else "#" } ?: "#"
+}
+
+/**
+ * In orders without letters (manual, recently added, colour) the rail is a handle: its length shows
+ * how much of the stack is in view, its place how far down you are. Drag it and the stack follows,
+ * with a bubble saying where you are: the artist's initial, the month the album arrived, or its colour.
+ */
+@Composable
+private fun ScrollHandle(vm: AppViewModel, state: LazyListState, modifier: Modifier) {
+    val list = vm.visible
+    val scrollable by remember { derivedStateOf { state.canScrollForward || state.canScrollBackward } }
+    if (list.size < 12 || !scrollable) { Spacer(modifier); return }
+    val view = LocalView.current
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val sort = vm.sort
+    var held by remember { mutableStateOf<Float?>(null) }   // where the handle is while it's dragged, 0 to 1
+    var at by remember { mutableStateOf<Album?>(null) }      // the album in the middle of the stack then
+    var thumb by remember { mutableStateOf(0f to 0f) }       // its top and length, for the bubble
+    val minThumb = with(density) { 40.dp.toPx() }
+    fun thumbLen(track: Float, share: Float) = (track * share).coerceIn(minOf2(minThumb, track * .5f), track * .5f)
+    Box(
+        modifier.padding(vertical = 4.dp)
+            .pointerInput(list) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val track = size.height.toFloat()
+                    val m = stackMetrics(state)
+                    val th = thumbLen(track, m.share)
+                    val top = m.fraction * (track - th)
+                    // hold the handle where you took it; a touch elsewhere brings it under your finger
+                    val grab = if (down.position.y in top..(top + th)) down.position.y - top else th / 2
+                    var lastKey: String? = null
+                    fun go(y: Float) {
+                        val g = ((y - grab) / (track - th).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                        held = g
+                        thumb = g * (track - th) to th
+                        val n = state.layoutInfo.totalItemsCount
+                        val target = g * (m.avg * n - m.viewport).coerceAtLeast(0f)
+                        val idx = (target / m.avg).toInt().coerceIn(0, max(0, n - 1))
+                        scope.launch { state.scrollToItem(idx, (target - idx * m.avg).toInt()) }
+                        val a = list[((target + m.viewport / 2) / m.avg).toInt().coerceIn(0, list.lastIndex)]
+                        val k = bubbleKey(a, sort)
+                        if (k != lastKey) { if (lastKey != null) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); lastKey = k }
+                        at = a
+                    }
+                    go(down.position.y)
+                    down.consume()
+                    drag(down.id) { go(it.position.y); it.consume() }
+                    held = null; at = null
+                }
+            }
+            .drawBehind {   // read while drawing, so scrolling only redraws the handle
+                val track = size.height
+                val m = stackMetrics(state)
+                val th = thumbLen(track, m.share)
+                val g = held ?: m.fraction
+                val x = size.width / 2
+                drawLine(Color.White.copy(alpha = .1f), Offset(x, 0f), Offset(x, track), 2.dp.toPx(), cap = StrokeCap.Round)
+                val w = (if (held != null) 8.dp else 6.dp).toPx()
+                drawRoundRect(if (held != null) Palette.Accent else Color.White.copy(alpha = .55f), Offset(x - w / 2, g * (track - th)), Size(w, th), CornerRadius(w / 2))
+            },
+    ) {
+        val a = at
+        if (a != null) {
+            val y = with(density) { (thumb.first + thumb.second / 2).toDp() }
+            val key = bubbleKey(a, sort)
+            val mod = Modifier.align(Alignment.TopEnd).offset(x = (-44).dp, y = y - 30.dp).height(60.dp).shadow(12.dp, CircleShape)
+            when (sort) {
+                Sort.COLOR -> Box(mod.size(60.dp).background(parseColor(a.color), CircleShape).border(3.dp, Color.White.copy(alpha = .85f), CircleShape))
+                Sort.ADDED -> Box(mod.background(Palette.Accent, CircleShape).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+                    Text(key, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                }
+                else -> Box(mod.size(60.dp).background(Palette.Accent, CircleShape), contentAlignment = Alignment.Center) {
+                    Text(key, color = Color.White, fontSize = 26.sp, fontFamily = FontFamily.Serif)
+                }
+            }
+        }
+    }
+}
 
 private fun pillFor(vm: AppViewModel, id: String): String? = when {
     vm.openId != id -> null
@@ -386,6 +507,8 @@ private fun WallShelf(vm: AppViewModel) {
                                 onTap = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.tap(a) },
                                 onHold = { reorder.begin(a, list) },
                                 lifted = a.id == reorder.key,
+                                out = a.id == vm.openId && a.id == vm.nowAlbumId && vm.nowTitle.isNotEmpty(),
+                                onRecordTap = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.toggle() },
                                 modifier = if (a.id == reorder.key) Modifier.held(reorder, a.id, vertical = false) else Modifier.animateItem(),
                             )
                         }
@@ -398,15 +521,17 @@ private fun WallShelf(vm: AppViewModel) {
                     for ((k, i) in vm.railKeys) Box(
                         Modifier.size(width = 36.dp, height = 40.dp).clip(RoundedCornerShape(6.dp)).clickable { scope.launch { state.animateScrollToItem(i) } },
                         contentAlignment = Alignment.Center,
-                    ) { Text(k, color = Palette.Faint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = .12.em) }
+                    ) { Text(k, color = Color.White.copy(alpha = .5f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = .12.em) }
                 }
             }
         }
-        LaunchedEffect(vm.openId) {
+        val outNow = vm.openId != null && vm.openId == vm.nowAlbumId && vm.nowTitle.isNotEmpty()
+        LaunchedEffect(vm.openId, outNow) {
             val i = list.indexOfFirst { it.id == vm.openId }
             if (i < 0) return@LaunchedEffect
             val vp = state.layoutInfo.viewportSize.width
-            state.animateScrollToItem(i, -((vp - cp.toInt()) / 2).coerceAtLeast(0))
+            val slot = if (outNow) (cp * OUT_WALL).toInt() else cp.toInt()
+            state.animateScrollToItem(i, -((vp - slot) / 2).coerceAtLeast(0))
         }
     }
 }
@@ -450,14 +575,15 @@ private fun PlayerBar(vm: AppViewModel) {
     Column(
         Modifier.fillMaxWidth().background(Palette.Bg.copy(alpha = .97f))
             .drawBehind { drawLine(Palette.Line, Offset(0f, 0f), Offset(size.width, 0f), 1f) }
+            .pointerInput(Unit) { detectVerticalDragGestures { _, dy -> if (dy < -6f) vm.showPlayer = true } }
+            .clickable(remember { MutableInteractionSource() }, indication = null) { vm.showPlayer = true }
             .windowInsetsPadding(WindowInsets.navigationBars)
             .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
-                model = vm.nowArt, contentDescription = "Open album",
-                modifier = Modifier.size(46.dp).clip(RoundedCornerShape(3.dp)).background(Color(0xFF222222))
-                    .clickable { vm.nowAlbumId?.let { vm.openId = it; vm.openSheet(it) } },
+                model = vm.nowArt, contentDescription = "Now playing",
+                modifier = Modifier.size(46.dp).clip(RoundedCornerShape(3.dp)).background(Color(0xFF222222)),
             )
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(vm.nowTitle, color = Palette.Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

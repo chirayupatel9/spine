@@ -7,12 +7,14 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -23,6 +25,7 @@ import dev.chirayupatel.music.App
 import dev.chirayupatel.music.net.Album
 import dev.chirayupatel.music.net.AlbumDetail
 import dev.chirayupatel.music.net.NotSignedIn
+import dev.chirayupatel.music.net.SpotifyState
 import dev.chirayupatel.music.net.Status
 import dev.chirayupatel.music.playback.PlaybackService
 import kotlinx.coroutines.Dispatchers
@@ -34,11 +37,16 @@ import java.io.File
 import java.io.IOException
 import java.text.Collator
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.random.Random
 
 enum class Sort(val label: String) {
     ARTIST("By artist"), DECADE("By decade"), ADDED("Recently added"), TITLE("By title"), COLOR("By colour"), MANUAL("Manual order")
 }
+
+/** A track in Up next: where it is in the player's list, and what to show for it. */
+data class QueueItem(val index: Int, val id: String, val title: String, val number: Int, val durationMs: Long)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val api = (app as App).api
@@ -59,10 +67,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var openId by mutableStateOf<String?>(null)
     var sheet by mutableStateOf<AlbumDetail?>(null)
     var showSettings by mutableStateOf(false)
+    var showPlayer by mutableStateOf(false)   // the full-screen player
     var wallMode by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
 
-    // what's playing (mirrors the background player)
+    // what's playing (mirrors the background player, or Spotify)
     var nowAlbumId by mutableStateOf<String?>(null); private set
     var nowTrackId by mutableStateOf<String?>(null); private set
     var nowTitle by mutableStateOf(""); private set
@@ -71,7 +80,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var isPlaying by mutableStateOf(false); private set
     var position by mutableLongStateOf(0L); private set
     var duration by mutableLongStateOf(0L); private set
-    private var spotifyMode = false
+    var upNext by mutableStateOf<List<QueueItem>>(emptyList()); private set
+    /** Shuffle and repeat as the playing source has them (repeat: Player.REPEAT_MODE_*). */
+    var shuffleOn by mutableStateOf(prefs.getBoolean("shuffle", false)); private set
+    var repeatMode by mutableIntStateOf(prefs.getInt("repeat", Player.REPEAT_MODE_OFF)); private set
+    var spotifyMode by mutableStateOf(false); private set
+    private var foreground = true
 
     val server: String get() = api.server
     fun artUrl(path: String?): String? = path?.let { api.url(it) }
@@ -103,12 +117,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         signedIn = ok
         if (ok) refresh()
         connectPlayer()
-        viewModelScope.launch {   // keep the position bar moving while something plays
+        viewModelScope.launch {   // keep the position moving while something plays
+            var tick = 0
             while (true) {
-                controller?.let { if (it.isPlaying) { position = it.currentPosition; duration = max(0L, it.duration) } }
+                if (spotifyMode) {
+                    if (isPlaying && duration > 0) position = min(duration, position + 500)
+                    if (foreground && tick % 6 == 0) pollSpotify()
+                } else controller?.let { if (it.isPlaying) { position = it.currentPosition; duration = max(0L, it.duration) } }
+                tick++
                 delay(500)
             }
         }
+    }
+
+    fun onForeground(on: Boolean) {
+        foreground = on
+        if (on && spotifyMode) viewModelScope.launch { pollSpotify() }
     }
 
     /* ------------------------------------------------ signing in and loading */
@@ -126,8 +150,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         controller?.run { stop(); clearMediaItems() }
         api.signOut()
         withContext(Dispatchers.IO) { cacheFile.delete() }
-        albums = emptyList(); loaded = false; openId = null; sheet = null; showSettings = false
-        nowAlbumId = null; nowTitle = ""; spotifyMode = false
+        albums = emptyList(); loaded = false; openId = null; sheet = null; showSettings = false; showPlayer = false
+        nowAlbumId = null; nowTitle = ""; spotifyMode = false; upNext = emptyList()
         signedIn = false
     }
 
@@ -143,6 +167,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             loaded = true
             withContext(Dispatchers.IO) { cacheFile.writeText(text) }
             status = runCatching { api.status() }.getOrNull()
+            // Pick up whatever Spotify is already playing, unless this phone is playing something.
+            if (status?.spotify?.connected == true && !spotifyMode && (controller?.mediaItemCount ?: 0) == 0) {
+                val s = runCatching { api.spotifyState() }.getOrNull()
+                if (s?.track != null && s.isPlaying == true) { spotifyMode = true; applySpotify(s) }
+            }
         } catch (e: NotSignedIn) {
             signedIn = false
         } catch (e: IOException) {
@@ -225,7 +254,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun sync(p: Player) {
-        if (spotifyMode && p.mediaItemCount == 0) return
+        // While Spotify plays, this phone's own player (paused, or empty) has nothing to say,
+        // until it starts playing again itself.
+        if (spotifyMode && !p.isPlaying) return
         isPlaying = p.isPlaying
         val item = p.currentMediaItem
         nowTrackId = item?.mediaId
@@ -239,18 +270,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         position = p.currentPosition
         duration = max(0L, p.duration)
+        if (p.mediaItemCount > 0) {
+            if (p.shuffleModeEnabled != shuffleOn) { shuffleOn = p.shuffleModeEnabled; prefs.edit().putBoolean("shuffle", shuffleOn).apply() }
+            if (p.repeatMode != repeatMode) { repeatMode = p.repeatMode; prefs.edit().putInt("repeat", repeatMode).apply() }
+            val q = upNextOf(p)
+            if (q != upNext) upNext = q
+        }
     }
 
-    fun play(albumId: String, index: Int = 0, shuffle: Boolean = false) = viewModelScope.launch {
+    /** What plays after this track, in the player's order (shuffled or not), wrapping if repeating. */
+    private fun upNextOf(p: Player): List<QueueItem> {
+        val tl = p.currentTimeline
+        if (tl.isEmpty) return emptyList()
+        val tracks = nowAlbumId?.let { details[it]?.trackList }.orEmpty().associateBy { it.id }
+        val mode = if (p.repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_OFF else p.repeatMode
+        val start = p.currentMediaItemIndex
+        val out = ArrayList<QueueItem>()
+        var i = start
+        while (out.size < 60) {
+            i = tl.getNextWindowIndex(i, mode, p.shuffleModeEnabled)
+            if (i == C.INDEX_UNSET || i == start) break
+            val item = p.getMediaItemAt(i)
+            val t = tracks[item.mediaId]
+            out += QueueItem(i, item.mediaId, item.mediaMetadata.title?.toString().orEmpty(), t?.trackNo ?: (i + 1), ((t?.duration ?: 0.0) * 1000).toLong())
+        }
+        return out
+    }
+
+    /** `index`: the track to start on. Leave it out to play the album from the top, or from a random
+     *  track when shuffle is on. */
+    fun play(albumId: String, index: Int? = null, shuffle: Boolean = false) = viewModelScope.launch {
         try {
             val a = detail(albumId)
             if (a.trackList.isEmpty()) { message = "This album has no playable tracks"; return@launch }
             if (a.source == "spotify") {
                 controller?.pause()
-                api.spotifyPlay(a.uri, index)
-                spotifyMode = true
-                nowAlbumId = a.id; nowTitle = a.trackList.getOrNull(index)?.title ?: a.title; nowArtist = a.artist
-                nowArt = artUrl(a.art); isPlaying = true; position = 0; duration = 0
+                val offset = if (shuffle) Random.nextInt(a.trackList.size) else (index ?: 0)
+                api.spotifyPlay(a.uri, offset)
+                spotifyMode = true; upNext = emptyList()
+                nowAlbumId = a.id; nowTitle = a.trackList.getOrNull(offset)?.title ?: a.title; nowArtist = a.artist
+                nowArt = artUrl(a.art); isPlaying = true; position = 0
+                duration = ((a.trackList.getOrNull(offset)?.duration ?: 0.0) * 1000).toLong()
+                delay(800); pollSpotify()
                 return@launch
             }
             val art = a.art?.let { Uri.parse(api.url(it)) }
@@ -267,11 +328,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     ).build()
             }
             val c = controller ?: run { message = "The player isn't ready yet"; return@launch }
-            c.setMediaItems(items, index.coerceIn(0, items.lastIndex), 0L)
-            c.shuffleModeEnabled = shuffle
+            if (shuffle && !shuffleOn) { shuffleOn = true; prefs.edit().putBoolean("shuffle", true).apply() }
+            val first = index ?: if (shuffleOn) Random.nextInt(items.size) else 0
+            if (spotifyMode) { spotifyMode = false; runCatching { api.spotifyControl("pause") } }
+            nowAlbumId = a.id
+            c.setMediaItems(items, first.coerceIn(0, items.lastIndex), 0L)
+            c.shuffleModeEnabled = shuffleOn
+            c.repeatMode = repeatMode
             c.prepare()
             c.play()
-            nowAlbumId = a.id
         } catch (e: IOException) { handle(e) }
     }
 
@@ -279,29 +344,80 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (spotifyMode) {
             val action = if (isPlaying) "pause" else "resume"
             isPlaying = !isPlaying
-            viewModelScope.launch { runCatching { api.spotifyControl(action) }.onFailure { message = it.message } }
+            spotify(action)
             return
         }
         controller?.let { if (it.isPlaying) it.pause() else it.play() }
     }
 
-    fun next() {
-        if (spotifyMode) viewModelScope.launch { runCatching { api.spotifyControl("next") } }
-        else controller?.seekToNextMediaItem()
-    }
+    fun next() { if (spotifyMode) spotify("next") else controller?.seekToNextMediaItem() }
 
     fun prev() {
-        if (spotifyMode) viewModelScope.launch { runCatching { api.spotifyControl("previous") } }
+        if (spotifyMode) spotify("previous")
         else controller?.let { if (it.currentPosition > 4000 || !it.hasPreviousMediaItem()) it.seekTo(0) else it.seekToPreviousMediaItem() }
     }
 
     fun seekTo(fraction: Float) {
+        if (spotifyMode) {
+            if (duration <= 0) return
+            position = (duration * fraction).toLong()
+            spotify("seek", position)
+            return
+        }
         controller?.let { if (it.duration > 0) { it.seekTo((it.duration * fraction).toLong()); position = it.currentPosition } }
+    }
+
+    /** Up next: play that track now. */
+    fun playQueueItem(index: Int) { controller?.run { seekToDefaultPosition(index); play() } }
+
+    fun toggleShuffle() {
+        val on = !shuffleOn
+        shuffleOn = on
+        if (spotifyMode) { spotify("shuffle", on); return }
+        prefs.edit().putBoolean("shuffle", on).apply()
+        controller?.shuffleModeEnabled = on
+    }
+
+    /** Off, then the whole album, then this track. */
+    fun cycleRepeat() {
+        val next = when (repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF }
+        repeatMode = next
+        if (spotifyMode) { spotify("repeat", when (next) { Player.REPEAT_MODE_ALL -> "context"; Player.REPEAT_MODE_ONE -> "track"; else -> "off" }); return }
+        prefs.edit().putInt("repeat", next).apply()
+        controller?.repeatMode = next
+    }
+
+    private fun spotify(action: String, value: Any? = null) = viewModelScope.launch {
+        try { api.spotifyControl(action, value) } catch (e: IOException) { handle(e) }
+        delay(600)
+        pollSpotify()
+    }
+
+    private suspend fun pollSpotify() {
+        if (!spotifyMode) return
+        val s = try { api.spotifyState() } catch (e: IOException) { return }
+        if (s.track != null) applySpotify(s)
+    }
+
+    private fun applySpotify(s: SpotifyState) {
+        nowTitle = s.track.orEmpty()
+        nowArtist = s.artist.orEmpty()
+        isPlaying = s.isPlaying == true
+        position = s.progressMs ?: 0L
+        duration = s.durationMs ?: 0L
+        shuffleOn = s.shuffle == true
+        repeatMode = when (s.repeat) { "context" -> Player.REPEAT_MODE_ALL; "track" -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF }
+        val mine = albums.firstOrNull { it.id == s.albumId }
+        nowArt = mine?.art?.let(::artUrl) ?: s.image   // the server's copy of the cover, so it doesn't load twice
+        if (s.albumId != null && s.albumId != nowAlbumId) {
+            nowAlbumId = s.albumId
+            if (mine != null) openId = mine.id
+        }
     }
 
     fun putBack() {
         if (nowAlbumId == openId) controller?.run { stop(); clearMediaItems() }
-        if (nowAlbumId == openId) { nowAlbumId = null; nowTitle = ""; isPlaying = false }
+        if (nowAlbumId == openId) { nowAlbumId = null; nowTitle = ""; isPlaying = false; showPlayer = false; upNext = emptyList() }
         openId = null
         sheet = null
     }
@@ -318,7 +434,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
 private val collator: Collator = Collator.getInstance().apply { strength = Collator.PRIMARY }
 private fun cmp(a: String?, b: String?) = collator.compare(a.orEmpty(), b.orEmpty())
-private fun artistKey(s: String) = s.replace(Regex("^the\\s+", RegexOption.IGNORE_CASE), "").trim()
+fun artistKey(s: String) = s.replace(Regex("^the\\s+", RegexOption.IGNORE_CASE), "").trim()
 
 private fun hueKey(hex: String): Double {
     val c = parseColor(hex)
