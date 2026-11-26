@@ -10,6 +10,14 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
+    <!-- Spotify on this phone (opened so the phone shows up as a Spotify speaker), and Android's
+         own output switcher (the speaker button while your own music plays) -->
+    <queries>
+        <package android:name="com.spotify.music" />
+        <intent><action android:name="com.android.systemui.action.LAUNCH_MEDIA_OUTPUT_DIALOG" /></intent>
+        <intent><action android:name="com.android.settings.panel.action.MEDIA_OUTPUT" /></intent>
+    </queries>
+
     <application
         android:name=".App"
         android:label="@string/app_name"

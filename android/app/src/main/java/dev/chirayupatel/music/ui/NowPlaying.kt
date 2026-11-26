@@ -66,6 +66,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
@@ -81,8 +82,10 @@ import kotlin.math.max
 
 /**
  * The full-screen player. It rises from the player bar (tap it, or swipe it up) and goes back down
- * with the chevron, Back, or a swipe down from the top. The cover sits in front of its record,
- * which slides out of the sleeve once the screen is up and turns while the music plays.
+ * with the chevron, Back, or a swipe down from the top. Upright, everything sits on one centre
+ * line: the cover with its record rising out of the top of the sleeve, the title, the controls, and
+ * where it's playing (tap it to choose a speaker). On a wide screen the record slides out to the
+ * right of the cover instead, with the controls beside it.
  */
 @Composable
 fun NowPlaying(vm: AppViewModel) {
@@ -141,7 +144,7 @@ private fun NowPlayingScreen(vm: AppViewModel) {
             .nestedScroll(connection),
     ) {
         val wide = maxWidth > maxHeight && maxWidth >= 600.dp
-        val cs = if (wide) min(min(maxWidth * .38f, maxHeight * .62f), 520.dp) else min(min((maxWidth - 40.dp) / 1.25f, maxHeight * .44f), 400.dp)
+        val cs = if (wide) min(min(maxWidth * .36f, maxHeight * .6f), 520.dp) else min(min(maxWidth - 64.dp, maxHeight * .4f), 420.dp)
         Column(
             Modifier.fillMaxSize().verticalScroll(scroll).windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -149,13 +152,13 @@ private fun NowPlayingScreen(vm: AppViewModel) {
             Header(vm, album?.title ?: "")
             if (wide) {
                 Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(56.dp)) {
-                    Stage(vm, cs, tint)
+                    Stage(vm, cs, tint, wide = true)
                     Column(Modifier.width(380.dp)) { Controls(vm); UpNext(vm) }
                 }
             } else {
-                Spacer(Modifier.height(18.dp))
-                Stage(vm, cs, tint)
-                Spacer(Modifier.height(30.dp))
+                Spacer(Modifier.height(6.dp))
+                Stage(vm, cs, tint, wide = false)
+                Spacer(Modifier.height(26.dp))
                 Column(Modifier.widthIn(max = 440.dp).fillMaxWidth()) { Controls(vm); UpNext(vm) }
                 Spacer(Modifier.height(24.dp))
             }
@@ -175,13 +178,15 @@ private fun Header(vm: AppViewModel, from: String) {
     }
 }
 
-/** The cover in front of its record. Once the screen is up, the record slides out to the right. */
+/** The cover in front of its record. Once the screen is up, the record comes out of the sleeve:
+ *  up out of the top (upright), or out to the right (wide). It turns while the music plays. */
 @Composable
-private fun Stage(vm: AppViewModel, cs: Dp, tint: Color) {
+private fun Stage(vm: AppViewModel, cs: Dp, tint: Color, wide: Boolean) {
     var out by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(220); out = true }
     val f by animateFloatAsState(if (out) 1f else 0f, tween(620, easing = OpenEasing), label = "out")
-    Box(Modifier.size(width = cs * 1.25f, height = cs)) {
+    val shape = RoundedCornerShape(6.dp)
+    if (wide) Box(Modifier.size(width = cs * 1.25f, height = cs)) {
         Vinyl(
             vm.nowArt, tint, spinning = out && vm.isPlaying, onTap = vm::toggle,
             modifier = Modifier.offset(cs * .03f, cs * .03f).size(cs * .94f).graphicsLayer { translationX = (cs * (.125f + .125f * f)).toPx() },
@@ -189,19 +194,36 @@ private fun Stage(vm: AppViewModel, cs: Dp, tint: Color) {
         AsyncImage(
             model = vm.nowArt, contentDescription = null, contentScale = ContentScale.Crop,
             modifier = Modifier.size(cs).graphicsLayer { translationX = (cs * .125f * (1f - f)).toPx() }
-                .shadow(28.dp, RoundedCornerShape(4.dp)).clip(RoundedCornerShape(4.dp)).background(tint),
+                .shadow(28.dp, shape).clip(shape).background(tint),
         )
+    } else {
+        val rise = cs * .19f   // how far the record shows above the sleeve
+        Box(Modifier.size(width = cs, height = cs + rise)) {
+            Vinyl(
+                vm.nowArt, tint, spinning = out && vm.isPlaying, onTap = vm::toggle,
+                modifier = Modifier.offset(cs * .05f, rise + cs * .05f).size(cs * .9f).graphicsLayer { translationY = -((rise + cs * .05f) * f).toPx() },
+            )
+            AsyncImage(
+                model = vm.nowArt, contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.offset(y = rise).size(cs).shadow(28.dp, shape).clip(shape).background(tint),
+            )
+        }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Controls(vm: AppViewModel) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {   // centred; a long title scrolls
+        Text(
+            vm.nowTitle, color = Palette.Ink, fontFamily = FontFamily.Serif, fontSize = 26.sp, maxLines = 1,
+            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2000),
+        )
+    }
     Text(
-        vm.nowTitle, color = Palette.Ink, fontFamily = FontFamily.Serif, fontSize = 26.sp, maxLines = 1,
-        modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2000),
+        vm.nowArtist, color = Palette.Muted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
     )
-    Text(vm.nowArtist, color = Palette.Muted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
     SeekBar(vm)
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Toggle(AvIcons.Shuffle, if (vm.shuffleOn) "Shuffle is on" else "Shuffle", on = vm.shuffleOn) { vm.toggleShuffle() }
@@ -216,6 +238,28 @@ private fun Controls(vm: AppViewModel) {
             AvIcons.Repeat, when (rep) { Player.REPEAT_MODE_ALL -> "Repeating the album"; Player.REPEAT_MODE_ONE -> "Repeating this track"; else -> "Repeat" },
             on = rep != Player.REPEAT_MODE_OFF, one = rep == Player.REPEAT_MODE_ONE,
         ) { vm.cycleRepeat() }
+    }
+    Box(Modifier.fillMaxWidth().padding(top = 12.dp), contentAlignment = Alignment.Center) { SpeakerPill(vm) }
+}
+
+/** Where it's playing: this phone (or the headphones on it), or another speaker in the accent
+ *  colour. Tap to choose: your Spotify speakers while Spotify plays, Android's outputs otherwise. */
+@Composable
+private fun SpeakerPill(vm: AppViewModel) {
+    val w = vm.where
+    val color = if (w.remote) Palette.Accent else Palette.Muted
+    Row(
+        Modifier.clip(RoundedCornerShape(50)).background(if (w.remote) Palette.Accent.copy(alpha = .14f) else Color.White.copy(alpha = .07f))
+            .clickable(onClickLabel = "Choose a speaker") { vm.openSpeakers() }
+            .padding(start = 12.dp, end = 13.dp, top = 9.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(AvIcons.forKind(w.kind), null, tint = color, modifier = Modifier.size(18.dp))
+        Text(
+            if (w.remote) "Playing on ${w.name}" else w.name, color = color, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 240.dp),
+        )
+        Icon(AvIcons.Down, null, tint = color.copy(alpha = .6f), modifier = Modifier.size(14.dp))
     }
 }
 

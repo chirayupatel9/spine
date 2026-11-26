@@ -151,6 +151,11 @@ fun SettingsSheet(vm: AppViewModel) {
                     color = Palette.Muted, fontSize = 14.sp,
                 )
                 if (sp?.configured == true && !sp.connected) GhostButton("Connect Spotify", Modifier.padding(top = 10.dp)) { vm.connectSpotify { openInBrowser(context, it) } }
+                if (me?.admin == true && sp?.configured == true) Text(   // Spotify lets in only the people the admin adds
+                    "Friends can use Spotify here once you add their Spotify account under User Management in your app on the Spotify " +
+                        "developer dashboard. While the app is in Spotify's development mode, that's up to 5 people.",
+                    color = Palette.Faint, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp),
+                )
             }
             Section("Music on this phone") {
                 Text(

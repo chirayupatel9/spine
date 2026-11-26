@@ -18,7 +18,7 @@ It's one small FastAPI server plus a touch-friendly web app. You can install it 
 - **Spotify.**
   - Your saved albums and your playlists sync onto the shelf; a **Playlists** tab shows just the playlists.
   - You can add any album or playlist by pasting its link.
-  - You can play on any Spotify device (phone, PC, speaker or TV), or make the screen running Album Viewer the speaker.
+  - Music plays on the screen you're using. The speaker button on the player shows where it's playing and moves Spotify to any of your Spotify speakers (phone, computer, speaker or TV). On Android it opens the phone's own list of outputs (Bluetooth and so on) for your own music.
 - **Music on your computer.** In Chrome or Edge, **Settings → Music on this computer** reads a folder of music on that computer and puts its albums on your shelf (from their tags, or their folders). Nothing is uploaded: it plays from the disk, and the browser keeps the folder for next time. Other browsers can open a folder for one visit. On Android, the app shows the music on the phone.
 - **Demo shelf.** One click loads 34 well-known albums from the iTunes catalogue, with real covers and 30-second previews that play on the screen. No account is needed, so you can try it before connecting anything. Remove it again in **Settings → Demo shelf**.
 - **The display.**
@@ -77,7 +77,7 @@ After 5 wrong passwords from one address, or 50 in total, in 15 minutes, sign-in
 
 What you need to know first:
 - **The Spotify account that owns the app needs Premium.** Spotify's development mode stops working if the owner's Premium lapses.
-- **At most 5 Spotify accounts can use your app**, and each must be added by hand (step 5). This is fine for personal use; Spotify describes development mode as for non-commercial use.
+- **At most 5 Spotify accounts can use your app**, and each must be added by hand (step 5). Friends can't add themselves: Spotify refuses everyone else, and lifting the limit ("extended quota") is only for registered businesses with hundreds of thousands of users. Friends who aren't on the list can still sign in with Google and use the music on their own computer or phone. This is fine for personal use; Spotify describes development mode as for non-commercial use.
 - **Playing music needs Premium** on the account that listens: both starting playback from Album Viewer and using the browser as a speaker.
 
 Steps:
@@ -103,7 +103,7 @@ Steps:
 Notes:
 - If Spotify blocks the saved-albums endpoint for your app, Album Viewer falls back to building albums from your saved songs. You can also add albums by link.
 - Spotify shares a playlist's tracks only with its owner and collaborators. Playlists you just follow still go on the shelf and play, but their track list stays empty.
-- Playing in the browser (Settings → "Use this screen as a Spotify speaker") works in Chrome, Edge, Firefox and Safari, on Android and iOS as well as desktop, according to Spotify. It needs full Premium: Spotify's mobile-only plans are excluded. On iPhone and iPad, playback moved to the page from another device doesn't start until you tap. You can also open the Spotify app on the device, pick it from the 🔈 speaker menu, and use Album Viewer as the remote; that keeps playing if the device puts the browser to sleep.
+- Spotify plays in the browser you're using (Settings → "Play Spotify in this browser", on by default), in Chrome, Edge, Firefox and Safari, on Android and iOS as well as desktop, according to Spotify. It needs full Premium: Spotify's mobile-only plans are excluded, and without Premium Spotify plays on another of your speakers instead. On iPhone and iPad, playback moved to the page from another device doesn't start until you tap. You can also pick the Spotify app on the device from the speaker button; that keeps playing if the device puts the browser to sleep. The Android app plays Spotify in the phone's Spotify app; if Spotify isn't open, the speaker list opens it.
 
 ## Hosting it
 - **At home (simplest).** Run it on a PC or server in your house. Open `http://<server-ip>:8000` from the tablet for local music. Spotify sign-in needs `PUBLIC_URL` to be https or 127.0.0.1, so use one of the options below for the Spotify part.

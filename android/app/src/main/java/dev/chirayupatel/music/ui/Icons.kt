@@ -36,4 +36,25 @@ object AvIcons {
     val Down = icon("down", stroke = listOf("M6 9.5l6 6 6-6"))
     val List = icon("list", stroke = listOf("M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"))
     val Repeat = icon("repeat", stroke = listOf("M4.5 10.5V9.5a3 3 0 0 1 3-3h11M15.5 3.5l3 3-3 3M19.5 13.5v1a3 3 0 0 1-3 3h-11M8.5 20.5l-3-3 3-3"))
+
+    // speakers: where the music plays
+    val Speaker = icon("speaker", stroke = listOf(
+        "M8.5 3h7A2.5 2.5 0 0 1 18 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 6 18.5v-13A2.5 2.5 0 0 1 8.5 3z",
+        "M15 14a3 3 0 1 1-6 0a3 3 0 1 1 6 0"), fill = listOf("M13 7.2a1 1 0 1 1-2 0a1 1 0 1 1 2 0"))
+    val Phone = icon("phone", stroke = listOf("M9.2 2.8h5.6a2.2 2.2 0 0 1 2.2 2.2v14a2.2 2.2 0 0 1-2.2 2.2H9.2A2.2 2.2 0 0 1 7 19V5a2.2 2.2 0 0 1 2.2-2.2z", "M10.6 17.8h2.8"))
+    val Computer = icon("computer", stroke = listOf("M6.1 5h11.8a1.6 1.6 0 0 1 1.6 1.6v7.3a1.6 1.6 0 0 1-1.6 1.6H6.1a1.6 1.6 0 0 1-1.6-1.6V6.6A1.6 1.6 0 0 1 6.1 5z", "M2.8 18.8h18.4"))
+    val Tv = icon("tv", stroke = listOf("M4.8 4.5h14.4a1.8 1.8 0 0 1 1.8 1.8v8.9a1.8 1.8 0 0 1-1.8 1.8H4.8A1.8 1.8 0 0 1 3 15.2V6.3a1.8 1.8 0 0 1 1.8-1.8z", "M8.5 20.5h7"))
+    val Headphones = icon("headphones", stroke = listOf(
+        "M4.5 16v-3.5a7.5 7.5 0 0 1 15 0V16",
+        "M5.1 13.5h1a1.6 1.6 0 0 1 1.6 1.6v3.8a1.6 1.6 0 0 1-1.6 1.6h-1a1.6 1.6 0 0 1-1.6-1.6v-3.8a1.6 1.6 0 0 1 1.6-1.6z",
+        "M17.9 13.5h1a1.6 1.6 0 0 1 1.6 1.6v3.8a1.6 1.6 0 0 1-1.6 1.6h-1a1.6 1.6 0 0 1-1.6-1.6v-3.8a1.6 1.6 0 0 1 1.6-1.6z"))
+    val Check = icon("check", stroke = listOf("M5 12.5l4.5 4.5L19 7.5"))
+
+    fun forKind(k: dev.chirayupatel.music.device.Speakers.Kind) = when (k) {
+        dev.chirayupatel.music.device.Speakers.Kind.PHONE -> Phone
+        dev.chirayupatel.music.device.Speakers.Kind.HEADPHONES -> Headphones
+        dev.chirayupatel.music.device.Speakers.Kind.COMPUTER -> Computer
+        dev.chirayupatel.music.device.Speakers.Kind.TV -> Tv
+        dev.chirayupatel.music.device.Speakers.Kind.SPEAKER -> Speaker
+    }
 }

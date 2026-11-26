@@ -1105,8 +1105,8 @@ const Player = {
       audio.src = this.album.source === "demo" ? t.uri : `/api/local/stream/${encodeURIComponent(t.id)}`;
       start();
     }
-    const device = this.album.source === "demo" ? "This screen · preview" : this.album.source === "device" ? "This computer" : "This screen";
-    this.ui({ title: t.title, artist: t.artist || this.album.artist, art: this.album.art, playing: true, device, pos: 0, dur: t.duration });
+    this.ui({ title: t.title, artist: t.artist || this.album.artist, art: this.album.art, playing: true, pos: 0, dur: t.duration });
+    Speakers.paint();
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist || this.album.artist, album: this.album.title,
         artwork: this.album.art ? [{ src: new URL(this.album.art, location.href).href, sizes: "800x800", type: "image/jpeg" }] : [] });
@@ -1114,22 +1114,33 @@ const Player = {
     setGlow(); updatePill(); renderSheetState(); NP.modes(); NP.queue();
   },
 
+  /* Spotify plays on this screen unless a speaker was picked (see Speakers). */
   async playSpotify(album, index, shuffle) {
+    Sdk.wake();   // in the tap itself, so the browser lets this page make sound
     if (this.mode === "browser") audio.pause();
     this.mode = "spotify"; this.album = album;
-    const device_id = await Sdk.deviceForPlay();
     let offset = index;
     if (shuffle) offset = Math.floor(Math.random() * Math.max(1, album.track_list.length || album.tracks || 1));
+    const play = device_id => api("/api/spotify/play", { method: "POST", body: { uri: album.uri, offset, device_id } }).then(() => device_id);
     try {
-      await api("/api/spotify/play", { method: "POST", body: { uri: album.uri, offset, device_id } });
-      this.sp = { ...(this.sp || {}), album_id: album.id, is_playing: true, progress_ms: 0 };
+      let device_id;
+      try { device_id = await play(await Speakers.target()); }
+      catch (err) {   // the speaker picked earlier has gone: play where it would have otherwise
+        if (!Speakers.chosen) throw err;
+        Speakers.chosen = null;
+        device_id = await play(await Speakers.target());
+      }
+      const d = Speakers.devices.find(x => x.id === device_id);
+      this.sp = { ...(this.sp || {}), album_id: album.id, is_playing: true, progress_ms: 0,
+        device_id, device: device_id === Sdk.deviceId ? "Album Viewer" : d?.name, device_type: d?.type };
       this.spAt = performance.now();
       const t = album.track_list[offset];
       this.ui({ title: t?.title || album.title, artist: album.artist, art: album.art, playing: true, pos: 0, dur: t?.duration || 0 });
+      Speakers.paint();
       this.startPolling();
       setGlow(); updatePill(); NP.modes(); NP.queue();
     } catch (err) {
-      if (/device/i.test(err.message)) openDevices(album, index);
+      if (/device|speaker/i.test(err.message)) Speakers.open({ retry: [album, index] });
       toast(err.message, 5000);
     }
   },
@@ -1213,13 +1224,12 @@ const Player = {
 
   ui(o) {
     for (const k in o) if (o[k] !== undefined) this.cur[k] = o[k];
-    const { title, artist, art, playing, device, pos, dur } = o;
+    const { title, artist, art, playing, pos, dur } = o;
     if ($("#player").hidden) { $("#player").hidden = false; requestAnimationFrame(render); }
     if (title !== undefined) $("#pTitle").textContent = title;
     if (artist !== undefined) $("#pArtist").textContent = artist;
     if (art !== undefined) $("#pCover").src = art || "";
     if (playing !== undefined) { $("#pToggle").innerHTML = icon(playing ? "pause" : "play"); }
-    if (device !== undefined) $("#pDeviceName").textContent = device || "";
     if (dur !== undefined) $("#pDur").textContent = fmt(dur || 0);
     if (pos !== undefined) {
       $("#pPos").textContent = fmt(pos);
@@ -1252,8 +1262,9 @@ const Player = {
       if (!s || !s.track) return;
       const changedAlbum = s.album_id !== this.sp?.album_id;
       this.sp = s; this.spAt = performance.now();
-      this.ui({ title: s.track, artist: s.artist, art: s.image, playing: s.is_playing, device: s.device,
+      this.ui({ title: s.track, artist: s.artist, art: s.image, playing: s.is_playing,
         pos: (s.progress_ms || 0) / 1000, dur: (s.duration_ms || 0) / 1000 });
+      Speakers.paint();
       if (changedAlbum && S.byId.has(s.album_id)) setOpen(s.album_id);
       setGlow(); updatePill(); NP.modes();
     } catch {}
@@ -1288,7 +1299,7 @@ $(".p-progress").addEventListener("click", e => {
 $("#pToggle").onclick = () => Player.toggle();
 $("#pNext").onclick = () => Player.next();
 $("#pPrev").onclick = () => Player.prev();
-$("#pDevice").onclick = () => S.status?.spotify?.connected ? openDevices() : toast("Local music and demo previews play on this screen. Connect Spotify in Settings to pick other speakers.");
+$("#pDevice").onclick = () => Speakers.open();
 if ("mediaSession" in navigator) {
   const ms = navigator.mediaSession;
   const on = (action, fn) => { try { ms.setActionHandler(action, fn); } catch {} };   // older browsers lack some actions
@@ -1330,21 +1341,20 @@ const NP = {
     np.style.transform = "";
     reveal(np, false, 300);
     for (const s of ["#topbar", "#room", "#player"]) $(s).inert = false;
-    this.outT = setTimeout(() => { np.classList.remove("out"); setSpin($("#npVinyl .label"), false, true); }, 300);
+    this.outT = setTimeout(() => { np.classList.remove("out"); this.spin(true); }, 300);
     if (!fromHistory && history.state?.np) { this.skipPop = true; history.back(); }
   },
 
   render() {
     const c = Player.cur;
     this.sync({ ...c, art: c.art || "" });
-    this.modes(); this.queue();
+    this.modes(); this.queue(); Speakers.paint();
   },
   sync(o) {
     if (o.title !== undefined) $("#npTitle").textContent = o.title;
     if (o.artist !== undefined) $("#npArtist").textContent = o.artist;
     if (o.art !== undefined) this.cover(o.art);
     if (o.playing !== undefined) { $("#npToggle").innerHTML = icon(o.playing ? "pause" : "play"); this.spin(); }
-    if (o.device !== undefined) $("#npDeviceName").textContent = o.device || "";
     if (o.dur !== undefined) $("#npDur").textContent = fmt(o.dur || 0);
     if (o.pos !== undefined && !this.seeking) this.setPos(o.pos, o.dur ?? Player.cur.dur);
     if (o.pos !== undefined || o.dur !== undefined) npBar.classList.toggle("fixed", !Player.canSeek());
@@ -1366,7 +1376,11 @@ const NP = {
     this.f = f;
     $("#npPos").textContent = fmt(pos);
   },
-  spin() { setSpin($("#npVinyl .label"), this.isOpen && np.classList.contains("out") && Player.playing()); },
+  /* The label turns, and so does the faint grain in the grooves: that's what shows above the sleeve. */
+  spin(stop = false) {
+    const on = !stop && this.isOpen && np.classList.contains("out") && Player.playing();
+    for (const el of $$("#npVinyl .label, #npVinyl .grain")) setSpin(el, on, stop);
+  },
   modes() {
     const sh = $("#npShuffle"), rp = $("#npRepeat"), on = Player.shuffleOn(), rep = Player.repeatMode();
     sh.classList.toggle("on", on); sh.setAttribute("aria-pressed", on);
@@ -1457,7 +1471,7 @@ $("#npNext").onclick = () => Player.next();
 $("#npPrev").onclick = () => Player.prev();
 $("#npShuffle").onclick = () => { haptic(6); Player.toggleShuffle(); };
 $("#npRepeat").onclick = () => { haptic(6); Player.cycleRepeat(); };
-$("#npDevice").onclick = () => $("#pDevice").onclick();
+$("#npDevice").onclick = () => Speakers.open();
 $("#npTracks").onclick = () => { const id = Player.albumId(); if (id && S.byId.has(id)) openSheet(id, $("#npCover")); };
 $("#npQueue").addEventListener("click", e => { const li = e.target.closest("li"); if (li) Player.jumpTo(+li.dataset.i); });
 addEventListener("popstate", () => {
@@ -1476,73 +1490,174 @@ let barY = null;
 $("#player").addEventListener("touchstart", e => { barY = e.touches.length === 1 && !e.target.closest(".p-progress") ? e.touches[0].clientY : null; }, { passive: true });
 $("#player").addEventListener("touchmove", e => { if (barY !== null && barY - e.touches[0].clientY > 24) { barY = null; NP.open(); } }, { passive: true });
 
-/* ======================================================== Spotify Web Playback SDK (optional) */
+/* ======================================================== speakers
+   Music plays on the screen you're using. Your own music plays in this page, and so does Spotify
+   (Sdk, below; it needs Premium), or else this phone's Spotify app. The speaker button on the
+   player shows where it's playing and moves Spotify to any of your Spotify speakers. A speaker you
+   pick is used until the page is reloaded; then it's this screen again. */
 
+const UA = navigator.userAgent;
+const IPAD = /Macintosh/.test(UA) && navigator.maxTouchPoints > 1;   // iPadOS Safari says it's a Mac
+const HERE = /iPad|Tablet/i.test(UA) || IPAD || (/Android/i.test(UA) && !/Mobile/i.test(UA)) ? { name: "This tablet", icon: "phone", type: "Tablet" }
+  : /Android|iPhone|iPod|Mobile/i.test(UA) ? { name: "This phone", icon: "phone", type: "Smartphone" }
+  : { name: "This computer", icon: "computer", type: "Computer" };
+const iconFor = type => ({ Computer: "computer", Smartphone: "phone", Tablet: "phone", TV: "tv", CastVideo: "tv", GameConsole: "tv", STB: "tv" }[type] || "speaker");
+
+/* Spotify in this browser: Spotify's Web Playback SDK makes this page a Spotify speaker, in desktop
+   and phone browsers alike. It needs Spotify Premium; without it, Spotify plays on another speaker. */
 const Sdk = {
-  player: null, deviceId: null, loading: null,
-  enabled() { return store.get("sdk", false); },
+  player: null, deviceId: null, loading: null, failed: false,
+  supported: typeof window.MediaKeys === "function",   // the SDK plays through the browser's media keys (EME)
+  enabled() { return this.supported && !this.failed && store.get("sdk", true); },
   load() {
     if (!this.enabled() || this.loading) return this.loading;
     this.loading = new Promise(resolve => {
-      window.onSpotifyWebPlaybackSDKReady = () => {
+      const give = id => { if (!id) this.loading = null; resolve(id); };   // a failed start can be tried again
+      const start = () => {
         this.player = new Spotify.Player({
           name: "Album Viewer",
           getOAuthToken: cb => api("/api/spotify/token").then(r => cb(r.access_token)).catch(() => {}),
           volume: 0.8,
         });
-        this.player.addListener("ready", ({ device_id }) => { this.deviceId = device_id; resolve(device_id); });
+        this.player.addListener("ready", ({ device_id }) => { this.deviceId = device_id; give(device_id); });
         this.player.addListener("not_ready", () => { this.deviceId = null; });
-        this.player.addListener("initialization_error", ({ message }) => { toast("Spotify player: " + message); resolve(null); });
-        this.player.addListener("authentication_error", ({ message }) => { toast("Spotify auth: " + message); resolve(null); });
-        this.player.addListener("account_error", () => { toast("Playing in the browser needs Spotify Premium"); resolve(null); });
+        // Without Premium (or in a browser it can't run in) Spotify plays on another speaker instead.
+        this.player.addListener("initialization_error", () => { this.failed = true; give(null); });
+        this.player.addListener("account_error", () => { this.failed = true; store.set("sdk", false); give(null); });
+        this.player.addListener("authentication_error", () => give(null));
         this.player.connect();
-        setTimeout(() => resolve(this.deviceId), 8000);
+        setTimeout(() => give(this.deviceId), 8000);
       };
+      if (window.Spotify?.Player) return start();
+      window.onSpotifyWebPlaybackSDKReady = start;
       const s = document.createElement("script"); s.src = "https://sdk.scdn.co/spotify-player.js"; document.head.appendChild(s);
     });
     return this.loading;
   },
-  async deviceForPlay() {
-    const chosen = store.get("device", null);
-    if (chosen && chosen !== "sdk") return chosen;
-    if (this.enabled()) {
-      try { this.player?.activateElement?.(); } catch {}
-      return (await this.load()) || undefined;
-    }
-    return undefined; // server uses the active device, or the first one available
-  },
+  stop() { try { this.player?.disconnect(); } catch {} this.player = null; this.deviceId = null; this.loading = null; },
+  wake() { try { this.player?.activateElement?.(); } catch {} },
+  async device() { return this.enabled() ? (await this.load()) || null : null; },
 };
 
-async function openDevices(retryAlbum, retryIndex) {
-  reveal($("#deviceSheet"), true);
-  const list = $("#deviceList");
-  list.innerHTML = '<div class="hint">Loading…</div>';
-  let devs = [];
-  try { devs = await api("/api/spotify/devices"); } catch (e) { list.innerHTML = `<div class="hint">${esc(e.message)}</div>`; return; }
-  const chosen = store.get("device", null);
-  const items = [];
-  if (Sdk.enabled()) items.push({ id: "sdk", name: "This screen (browser)", type: "Album Viewer" });
-  for (const d of devs) if (d.id !== Sdk.deviceId) items.push({ id: d.id, name: d.name, type: d.type, active: d.is_active });
-  if (!items.length) { list.innerHTML = '<div class="hint">No Spotify devices are online.</div>'; return; }
-  list.innerHTML = "";
-  for (const d of items) {
-    const b = document.createElement("button");
-    b.className = (chosen === d.id || (!chosen && d.active)) ? "on" : "";
-    b.innerHTML = `<span>${esc(d.name)}</span><span class="hint">${esc(d.type)}${d.active ? " · active" : ""}</span>`;
-    b.onclick = async () => {
-      store.set("device", d.id);
+const Speakers = {
+  chosen: null,   // { id, name }: a Spotify speaker picked during this visit ("sdk" is this browser)
+  devices: [],    // Spotify's speakers, as last fetched
+  retry: null,    // [album, index]: what to play once a speaker is picked
+  sink: null,     // { label }: another output for this page's own music, where the browser lets a page pick one
+
+  async fetch() {
+    try { this.devices = (await api("/api/spotify/devices")).filter(d => d.id && !d.is_restricted); }
+    catch { this.devices = []; }
+    return this.devices;
+  },
+  /* Where Spotify should play: the speaker picked during this visit; else this screen (this browser,
+     or this phone's Spotify app if it's the only phone online); else wherever Spotify is already
+     playing. undefined lets the server wake the first speaker it finds. */
+  async target() {
+    if (this.chosen?.id === "sdk") { const id = await Sdk.device(); if (id) return id; this.chosen = null; }
+    if (this.chosen) return this.chosen.id;
+    const sdk = await Sdk.device();
+    if (sdk) return sdk;
+    const devs = await this.fetch();
+    return this.mine()?.id || devs.find(d => d.is_active)?.id;
+  },
+  /* On a phone or tablet, its own Spotify app: the one speaker of its kind that's online. */
+  mine() {
+    if (HERE.type === "Computer") return null;
+    const same = this.devices.filter(d => d.type === HERE.type);
+    return same.length === 1 ? same[0] : null;
+  },
+  /* What the speaker button says: this screen, or the Spotify speaker it's playing on. */
+  now() {
+    if (Player.mode === "spotify") {
+      const s = Player.sp || {};
+      if (s.device_id && s.device_id === Sdk.deviceId) return { name: HERE.name, icon: HERE.icon, remote: false };
+      if (s.device_id && s.device_id === this.mine()?.id) return { name: `Spotify app on ${HERE.name.toLowerCase()}`, icon: HERE.icon, remote: false };
+      if (!s.device) return { name: "Spotify", icon: "speaker", remote: false };   // until Spotify says
+      return { name: s.device, icon: iconFor(s.device_type), remote: true };
+    }
+    return { name: this.sink?.label || HERE.name, icon: this.sink ? "speaker" : HERE.icon, remote: false };
+  },
+  paint() {
+    const d = this.now();
+    for (const [btn, label] of [[$("#pDevice"), $("#pDeviceName")], [$("#npDevice"), $("#npDeviceName")]]) {
+      label.textContent = d.remote ? `Playing on ${d.name}` : d.name;
+      btn.querySelector("use").setAttribute("href", "#i-" + d.icon);
+      btn.classList.toggle("remote", d.remote);
+    }
+  },
+
+  async open({ retry } = {}) {
+    this.retry = retry || null;
+    const spotify = Player.mode === "spotify" || !!retry;
+    $("#devRefresh").hidden = !spotify;
+    $("#devPick").hidden = spotify || !navigator.mediaDevices?.selectAudioOutput;
+    $("#devRefresh").parentElement.hidden = $("#devRefresh").hidden && $("#devPick").hidden;
+    reveal($("#deviceSheet"), true);
+    if (!spotify) return this.renderHere();
+    $("#deviceList").innerHTML = '<div class="hint">Looking for speakers…</div>';
+    $("#devHint").textContent = "";
+    await this.fetch();
+    this.renderSpotify();
+  },
+  row({ icon, name, sub, on }) {
+    return `<button type="button" class="${on ? "on" : ""}"><svg class="ic"><use href="#i-${icon}"/></svg>` +
+      `<span class="nm"><b>${esc(name)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</span>` +
+      (on ? '<svg class="tick"><use href="#i-check"/></svg>' : "") + "</button>";
+  },
+  /* Your own music plays in this page, through whatever this device plays sound through. */
+  renderHere() {
+    $("#deviceList").innerHTML = this.row({ icon: this.sink ? "speaker" : HERE.icon, name: this.sink?.label || HERE.name, sub: "Playing here", on: true });
+    $("#deviceList button").onclick = () => reveal($("#deviceSheet"), false);
+    $("#devHint").textContent = (HERE.type === "Computer"
+      ? "Your music plays through this computer's sound output, which you change in its sound settings."
+      : `Your music plays on ${HERE.name.toLowerCase()}. To hear it on Bluetooth headphones or a speaker, connect them to it.`)
+      + (S.status?.spotify?.connected ? " Spotify albums can play on any of your Spotify speakers." : "");
+  },
+  renderSpotify() {
+    const list = $("#deviceList"), cur = Player.mode === "spotify" ? Player.sp?.device_id : null;
+    const items = [];
+    const here = HERE.name.toLowerCase();
+    if (Sdk.enabled()) items.push({ id: "sdk", icon: HERE.icon, name: HERE.name, sub: "Plays here, in this browser", on: !!cur && cur === Sdk.deviceId, said: `Playing on ${here}` });
+    const mine = this.mine();
+    if (mine) items.push({ id: mine.id, icon: HERE.icon, name: `Spotify app on ${here}`, sub: mine.name, on: mine.id === cur, type: mine.type, said: `Playing in the Spotify app on ${here}` });
+    const others = this.devices.filter(d => d.id !== Sdk.deviceId && d !== mine).sort((a, b) => (b.is_active - a.is_active) || cmp(a.name, b.name));
+    for (const d of others) items.push({ id: d.id, icon: iconFor(d.type), name: d.name, sub: { Smartphone: "Phone", CastAudio: "Speaker", CastVideo: "TV" }[d.type] || d.type, on: d.id === cur, type: d.type });
+    list.innerHTML = items.length ? items.map(it => this.row(it)).join("") : '<div class="hint">No Spotify speakers are on right now.</div>';
+    [...list.querySelectorAll("button")].forEach((b, i) => { b.onclick = () => this.choose(items[i]); });
+    $("#devHint").textContent = HERE.type === "Computer" || items.length
+      ? "Don't see a speaker? Open Spotify on it, then refresh."
+      : `To play on ${HERE.name.toLowerCase()}, open the Spotify app on it, then refresh.`;
+  },
+  async choose(d) {
+    haptic(6);
+    this.chosen = { id: d.id, name: d.name };
+    reveal($("#deviceSheet"), false);
+    if (this.retry) { const [album, index] = this.retry; this.retry = null; return Player.playSpotify(album, index); }
+    if (Player.mode !== "spotify") return;
+    const id = d.id === "sdk" ? await Sdk.device() : d.id;
+    if (!id) { this.chosen = null; return toast("Spotify can't play in this browser (it needs Spotify Premium). Pick another speaker.", 5000); }
+    try {
+      await api("/api/spotify/transfer", { method: "POST", body: { device_id: id } });
+      if (Player.sp) Object.assign(Player.sp, { device_id: id, device: d.name, device_type: d.type });
+      this.paint();
+      toast(d.said || `Playing on ${d.name}`);
+    } catch (e) { toast(e.message); }
+    Player.pollSoon();
+  },
+  /* This page's own music on another output, in browsers that let a page choose (Firefox). */
+  async pickOutput() {
+    try {
+      const out = await navigator.mediaDevices.selectAudioOutput();
+      await audio.setSinkId(out.deviceId);
+      this.sink = { label: out.label || "Another speaker" };
       reveal($("#deviceSheet"), false);
-      if (retryAlbum) return Player.playSpotify(retryAlbum, retryIndex || 0);
-      if (Player.mode === "spotify") {
-        const id = d.id === "sdk" ? await Sdk.load() : d.id;
-        if (id) api("/api/spotify/transfer", { method: "POST", body: { device_id: id } }).then(() => Player.pollSoon()).catch(e => toast(e.message));
-      }
-      toast(`Playing on ${d.name}`);
-    };
-    list.appendChild(b);
-  }
-}
-$("#devRefresh").onclick = () => openDevices();
+      this.paint();
+    } catch (e) { if (!["NotAllowedError", "AbortError"].includes(e.name)) toast(e.message); }
+  },
+};
+$("#devRefresh").onclick = async () => { $("#deviceList").innerHTML = '<div class="hint">Looking for speakers…</div>'; await Speakers.fetch(); Speakers.renderSpotify(); };
+$("#devPick").onclick = () => Speakers.pickOutput();
 
 /* ======================================================== settings + status */
 
@@ -1698,7 +1813,7 @@ function openSettings() {
   $("#showHidden").checked = store.get("showHidden", false);
   $("#spineNames").checked = store.get("spineNames", true);
   $("#glowToggle").checked = store.get("glow", true);
-  $("#sdkToggle").checked = Sdk.enabled();
+  $("#sdkToggle").checked = Sdk.supported && store.get("sdk", true);
   $("#shape").value = store.get("shape", "bar");
   refreshStatus();
 }
@@ -1707,7 +1822,8 @@ window.openSettings = openSettings;
 function renderStatus(st) {
   const sp = st.spotify, lib = st.library || {}, demo = st.demo;
   const spBtns = $("#spButtons"); spBtns.innerHTML = "";
-  $("#spAdd").hidden = !sp.connected; $("#sdkRow").hidden = !sp.connected;
+  $("#spAdd").hidden = !sp.connected; $("#sdkRow").hidden = !sp.connected || !Sdk.supported;
+  $("#spFriends").hidden = !(st.admin && sp.configured);   // Spotify lets in only the people the admin adds
   if (!sp.configured) {
     $("#spStatus").innerHTML = st.admin
       ? `Not set up. Create an app at developer.spotify.com, add the redirect URI <code>${esc(sp.redirect_uri)}</code>, then set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET and restart.`
@@ -1785,7 +1901,10 @@ $("#spAddBtn").onclick = async () => {
   try { const a = await api("/api/spotify/add", { method: "POST", body: { link: $("#spLink").value } }); $("#spLink").value = ""; toast(`Added ${a.title}`); loadAlbums(); }
   catch (e) { toast(e.message); }
 };
-$("#sdkToggle").onchange = e => { store.set("sdk", e.target.checked); if (e.target.checked) Sdk.load(); else store.set("device", null); };
+$("#sdkToggle").onchange = e => {
+  store.set("sdk", e.target.checked); Sdk.failed = false;
+  if (e.target.checked) Sdk.load(); else { Sdk.stop(); if (Speakers.chosen?.id === "sdk") Speakers.chosen = null; }
+};
 $("#showHidden").onchange = e => { store.set("showHidden", e.target.checked); loadAlbums().then(() => applyAlbums(S.serverAlbums || [], false)); };
 $("#spineNames").onchange = e => { store.set("spineNames", e.target.checked); render(); };
 $("#glowToggle").onchange = e => { store.set("glow", e.target.checked); setGlow(); };

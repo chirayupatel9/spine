@@ -166,6 +166,7 @@ fun ShelfScreen(vm: AppViewModel) {
     }
     AlbumSheet(vm)
     SettingsSheet(vm)
+    SpeakerSheet(vm)
 }
 
 /* ---------------------------------------------------------------- top bar */
@@ -671,6 +672,14 @@ private fun PlayerBar(vm: AppViewModel) {
                 Box(Modifier.fillMaxWidth(frac).height(3.dp).clip(RoundedCornerShape(2.dp)).background(Palette.Accent))
             }
             Text(fmt(vm.duration), color = Palette.Muted, fontSize = 11.sp)
+        }
+        val w = vm.where
+        if (w.remote) Row(   // on another speaker: say where, and open the speaker list
+            Modifier.padding(bottom = 2.dp).clip(RoundedCornerShape(6.dp)).clickable { vm.openSpeakers() }.padding(vertical = 4.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(AvIcons.forKind(w.kind), null, tint = Palette.Accent, modifier = Modifier.size(15.dp))
+            Text("Playing on ${w.name}", color = Palette.Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

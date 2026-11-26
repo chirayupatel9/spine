@@ -261,3 +261,55 @@ def test_the_single_user_setup_becomes_the_owners_account():
             "db.kv_get('spotify_refresh_token'))")
     out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True, check=True).stdout
     assert out.strip() == "refresh ['sp_x'] ['loc_z'] ['loc_z', 'sp_x'] None"
+
+
+# ---------------------------------------------------------------- speakers
+
+def test_spotify_plays_on_the_speaker_you_pick(main, fake_spotify, monkeypatch):
+    """The apps pick the speaker (this phone or computer by default); the server passes it on."""
+    import json
+    from app import spotify
+    calls = []
+    devices = [{"id": "phone1", "name": "Pixel 8", "type": "Smartphone", "is_active": False},
+               {"id": "pc1", "name": "DESKTOP", "type": "Computer", "is_active": True}]
+    playing = {"is_playing": True, "progress_ms": 5, "context": {"uri": ALBUM["uri"]},
+               "item": {"name": "One", "duration_ms": 1000, "artists": [{"name": "Band"}], "album": {"id": ALBUM["id"], "name": "Saved Album", "images": []}},
+               "device": {"id": "phone1", "name": "Pixel 8", "type": "Smartphone"}}
+    fake = spotify.api
+
+    def api(uid, method, path, **kw):
+        if path == "/me/player/devices":
+            return {"devices": devices}
+        if path.startswith("/me/player"):
+            calls.append((method, path, kw.get("content")))
+            return playing if method == "GET" else None
+        return fake(uid, method, path, **kw)
+
+    monkeypatch.setattr(spotify, "api", api)
+    c, _ = spotify_client(main)
+    assert [d["id"] for d in c.get("/api/spotify/devices").json()] == ["phone1", "pc1"]
+    assert c.post("/api/spotify/play", json={"uri": ALBUM["uri"], "offset": 0, "device_id": "phone1"}).status_code == 200
+    assert calls[-1][:2] == ("PUT", "/me/player/play?device_id=phone1")
+    assert json.loads(calls[-1][2]) == {"context_uri": ALBUM["uri"], "offset": {"position": 0}}
+    assert c.post("/api/spotify/transfer", json={"device_id": "pc1"}).status_code == 200
+    assert calls[-1][:2] == ("PUT", "/me/player") and json.loads(calls[-1][2]) == {"device_ids": ["pc1"], "play": True}
+    st = c.get("/api/spotify/state").json()
+    assert (st["device"], st["device_id"], st["device_type"], st["album_id"]) == ("Pixel 8", "phone1", "Smartphone", "sp_" + ALBUM["id"])
+
+
+def test_spotify_says_why_it_turns_a_friend_away(main, monkeypatch):
+    """Spotify answers 403 for accounts the app's owner hasn't added; the message says what to do."""
+    from app import config, spotify
+
+    class Refused:
+        status_code = 403
+
+    monkeypatch.setattr(spotify._http, "get", lambda *a, **k: Refused())
+    monkeypatch.setattr(config, "PASSWORD_SIGN_IN", True)   # no Google sign-in on this server
+    with pytest.raises(spotify.SpotifyError) as e:
+        spotify.me("token")
+    assert "up to 5" in str(e.value) and "Google" not in str(e.value)
+    monkeypatch.setattr(config, "PASSWORD_SIGN_IN", False)
+    with pytest.raises(spotify.SpotifyError) as e:
+        spotify.me("token")
+    assert "sign in with Google instead" in str(e.value)

@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Base64
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -24,10 +25,12 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import dev.chirayupatel.music.App
 import dev.chirayupatel.music.device.PhoneMusic
+import dev.chirayupatel.music.device.Speakers
 import dev.chirayupatel.music.net.Album
 import dev.chirayupatel.music.net.AlbumDetail
 import dev.chirayupatel.music.net.Me
 import dev.chirayupatel.music.net.NotSignedIn
+import dev.chirayupatel.music.net.SpotifyDevice
 import dev.chirayupatel.music.net.SpotifyState
 import dev.chirayupatel.music.net.Status
 import dev.chirayupatel.music.playback.PlaybackService
@@ -52,6 +55,9 @@ enum class Sort(val label: String) {
 
 /** A track in Up next: where it is in the player's list, and what to show for it. */
 data class QueueItem(val index: Int, val id: String, val title: String, val number: Int, val durationMs: Long)
+
+/** Where the music is playing, for the speaker button: `remote` when it's another speaker than this phone. */
+data class Where(val name: String, val kind: Speakers.Kind, val remote: Boolean)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val api = (app as App).api
@@ -109,6 +115,39 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var spotifyMode by mutableStateOf(false); private set
     private var foreground = true
 
+    /* ------------------------------------------------ speakers: where it plays
+       Music plays on this phone unless you pick another speaker. Your own music plays in this app,
+       through the phone's speaker or whatever is connected to it (Android's output switcher moves
+       it). Spotify plays in this phone's Spotify app, or on another of your Spotify speakers once you
+       pick one; that choice lasts while the app is open. */
+    var output by mutableStateOf(Speakers.current(app)); private set
+    var speakerSheet by mutableStateOf(false)
+    var spotifyDevices by mutableStateOf<List<SpotifyDevice>>(emptyList()); private set
+    var devicesLoading by mutableStateOf(false); private set
+    var nowDeviceId by mutableStateOf<String?>(null); private set
+    var nowDeviceName by mutableStateOf<String?>(null); private set
+    var nowDeviceType by mutableStateOf<String?>(null); private set
+    private var chosenDeviceId: String? = null
+    /** An album waiting for a speaker: Spotify wasn't open on this phone when you pressed play. */
+    private class Pending(val albumId: String, val index: Int?, val shuffle: Boolean)
+    private var pending: Pending? = null
+    private var awaitingSpotify = 0L   // when you were sent to open Spotify, so it plays here once you're back
+    private val stopWatching = Speakers.watch(app) { output = Speakers.current(app) }
+
+    /** This phone's Spotify app among your Spotify speakers, if it's on. */
+    val phoneDevice: SpotifyDevice? get() = Speakers.thisPhone(getApplication(), spotifyDevices)
+
+    val where: Where get() = if (!spotifyMode) Where(output.name, output.kind, false) else {
+        val id = nowDeviceId
+        val name = nowDeviceName
+        when {
+            id != null && (id == phoneDevice?.id || id == prefs.getString("phoneDevice", null) ||
+                Speakers.isThisPhone(getApplication(), name, nowDeviceType)) -> Where("This phone", Speakers.Kind.PHONE, false)
+            name != null -> Where(name, Speakers.kindOf(nowDeviceType), true)
+            else -> Where("Spotify", Speakers.Kind.SPEAKER, false)
+        }
+    }
+
     val server: String get() = api.server
     fun artUrl(path: String?): String? = path?.let { api.url(it) }
 
@@ -162,7 +201,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onForeground(on: Boolean) {
         foreground = on
-        if (on && spotifyMode) viewModelScope.launch { pollSpotify() }
+        if (!on) return
+        output = Speakers.current(getApplication())
+        if (spotifyMode) viewModelScope.launch { pollSpotify() }
+        viewModelScope.launch { playHereIfWaiting() }
     }
 
     /* ------------------------------------------------ signing in and loading */
@@ -183,6 +225,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         serverAlbums = emptyList(); orderIds = emptyList(); me = null
         loaded = false; openId = null; sheet = null; showSettings = false; showPlayer = false
         nowAlbumId = null; nowTitle = ""; spotifyMode = false; upNext = emptyList()
+        chosenDeviceId = null; pending = null; speakerSheet = false
         signedIn = false
     }
 
@@ -413,11 +456,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val a = detail(albumId)
             if (a.source == "spotify") {   // a playlist Spotify won't list the tracks of still plays
+                val target = spotifyTarget()
+                if (target?.id == null) {   // Spotify isn't open on this phone: ask where to play
+                    pending = Pending(a.id, index, shuffle)
+                    speakerSheet = true
+                    return@launch
+                }
                 controller?.run { stop(); clearMediaItems() }   // this phone's own queue is done with
                 val count = a.trackList.size.takeIf { it > 0 } ?: a.tracks ?: 1
                 val offset = if (shuffle) Random.nextInt(count) else (index ?: 0)
-                api.spotifyPlay(a.uri, offset)
+                api.spotifyPlay(a.uri, offset, target.id)
                 spotifyMode = true; upNext = emptyList()
+                nowDeviceId = target.id; nowDeviceName = target.name; nowDeviceType = target.type
                 nowAlbumId = a.id; nowTitle = a.trackList.getOrNull(offset)?.title ?: a.title; nowArtist = a.artist
                 nowArt = artUrl(a.art); isPlaying = true; position = 0
                 duration = ((a.trackList.getOrNull(offset)?.duration ?: 0.0) * 1000).toLong()
@@ -511,6 +561,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun applySpotify(s: SpotifyState) {
+        if (s.deviceId != null) { nowDeviceId = s.deviceId; nowDeviceName = s.device; nowDeviceType = s.deviceType }
         nowTitle = s.track.orEmpty()
         nowArtist = s.artist.orEmpty()
         isPlaying = s.isPlaying == true
@@ -538,9 +589,79 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         sheet = null
     }
 
+    /* ------------------------------------------------ choosing a speaker */
+
+    /** Where Spotify should play: a speaker you picked while the app is open, else this phone's
+     *  Spotify app. Null when neither is on. */
+    private suspend fun spotifyTarget(): SpotifyDevice? {
+        val devs = loadDevices()
+        chosenDeviceId?.let { id -> devs.firstOrNull { it.id == id }?.let { return it } }
+        val phone = Speakers.thisPhone(getApplication(), devs)
+        if (phone != null && Speakers.isThisPhone(getApplication(), phone.name, phone.type)) prefs.edit().putString("phoneDevice", phone.id).apply()
+        return phone
+    }
+
+    private suspend fun loadDevices(): List<SpotifyDevice> {
+        devicesLoading = true
+        try { return api.spotifyDevices().also { spotifyDevices = it } } finally { devicesLoading = false }
+    }
+
+    fun refreshDevices() = viewModelScope.launch { try { loadDevices() } catch (e: IOException) { handle(e) } }
+
+    /** The speaker button: your Spotify speakers while Spotify plays, else Android's own list of outputs. */
+    fun openSpeakers() {
+        if (spotifyMode) { speakerSheet = true; refreshDevices(); return }
+        if (!Speakers.showSwitcher(getApplication())) message = "Connect Bluetooth headphones or a speaker to this phone to play there"
+    }
+
+    /** Play on this speaker: what's playing moves there, or the album that was waiting starts there. */
+    fun chooseSpeaker(d: SpotifyDevice) = viewModelScope.launch {
+        val id = d.id ?: return@launch
+        chosenDeviceId = id
+        if (id == phoneDevice?.id) prefs.edit().putString("phoneDevice", id).apply()
+        speakerSheet = false
+        val p = pending
+        pending = null
+        if (p != null) { play(p.albumId, p.index, p.shuffle); return@launch }
+        if (!spotifyMode) return@launch
+        try {
+            api.spotifyTransfer(id)
+            nowDeviceId = id; nowDeviceName = d.name; nowDeviceType = d.type
+        } catch (e: IOException) { handle(e) }
+        delay(800)
+        pollSpotify()
+    }
+
+    /** The sheet closed without a choice: nothing waits any more. */
+    fun closeSpeakers() { speakerSheet = false; if (awaitingSpotify == 0L) pending = null }
+
+    /** Spotify isn't open on this phone: open it, and play here when you come back. */
+    fun openSpotifyHere() {
+        if (!Speakers.openSpotify(getApplication())) { message = "Install Spotify on this phone to play Spotify here"; return }
+        awaitingSpotify = SystemClock.elapsedRealtime()
+        speakerSheet = false
+    }
+
+    /** Back from opening Spotify: this phone should be one of your Spotify speakers by now. */
+    private suspend fun playHereIfWaiting() {
+        val since = awaitingSpotify
+        if (since == 0L) return
+        awaitingSpotify = 0L
+        if (SystemClock.elapsedRealtime() - since > 5 * 60_000L) { pending = null; return }
+        var phone: SpotifyDevice? = null
+        for (attempt in 0 until 5) {   // Spotify takes a moment to tell its servers the phone is here
+            phone = try { Speakers.thisPhone(getApplication(), loadDevices()) } catch (e: IOException) { null }
+            if (phone != null) break
+            delay(1500)
+        }
+        if (phone == null) { message = "Spotify hasn't shown up on this phone yet. Try again in a moment."; speakerSheet = true; return }
+        chooseSpeaker(phone)
+    }
+
     private fun handle(e: IOException) { if (e is NotSignedIn) signedIn = false else message = e.message }
 
     override fun onCleared() {
+        stopWatching()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         super.onCleared()
     }

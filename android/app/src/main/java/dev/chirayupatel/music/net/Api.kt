@@ -106,8 +106,20 @@ data class SpotifyState(
     val album: String? = null,
     val image: String? = null,
     val device: String? = null,
+    @SerialName("device_id") val deviceId: String? = null,
+    @SerialName("device_type") val deviceType: String? = null,
     val shuffle: Boolean? = null,
     val repeat: String? = null,
+)
+
+/** One of the user's Spotify speakers (Spotify Connect): a phone, computer, speaker, TV… */
+@Serializable
+data class SpotifyDevice(
+    val id: String? = null,
+    val name: String = "",
+    val type: String = "",
+    @SerialName("is_active") val isActive: Boolean = false,
+    @SerialName("is_restricted") val isRestricted: Boolean = false,
 )
 
 class NotSignedIn : IOException("Not signed in")
@@ -232,8 +244,15 @@ class Api(context: Context) {
         client.newCall(req).execute().use { r -> check(r); json.decodeFromString<Link>(r.body?.string().orEmpty()).url }
     }
     suspend fun loadDemo() = post("/api/demo/load")
-    suspend fun spotifyPlay(uri: String?, offset: Int) =
-        post("/api/spotify/play", buildJsonObject { put("uri", uri); put("offset", offset) }.toString())
+    /** Play on one speaker (`deviceId`), or wherever Spotify is playing when it's null. */
+    suspend fun spotifyPlay(uri: String?, offset: Int, deviceId: String? = null) =
+        post("/api/spotify/play", buildJsonObject { put("uri", uri); put("offset", offset); deviceId?.let { put("device_id", it) } }.toString())
+    /** Move what's playing to another speaker. */
+    suspend fun spotifyTransfer(deviceId: String) =
+        post("/api/spotify/transfer", buildJsonObject { put("device_id", deviceId); put("play", true) }.toString())
+    /** The speakers Spotify can play on now; ones it won't take orders for are left out. */
+    suspend fun spotifyDevices(): List<SpotifyDevice> =
+        json.decodeFromString<List<SpotifyDevice>>(getText("/api/spotify/devices")).filter { !it.id.isNullOrEmpty() && !it.isRestricted }
     /** pause, resume, next, previous; seek (value: ms), shuffle (value: on/off), repeat (value: off, context, track). */
     suspend fun spotifyControl(action: String, value: Any? = null) = post("/api/spotify/control", buildJsonObject {
         put("action", action)

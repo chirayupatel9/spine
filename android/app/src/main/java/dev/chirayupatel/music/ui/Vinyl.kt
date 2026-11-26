@@ -59,6 +59,8 @@ fun Vinyl(art: String?, color: Color, spinning: Boolean, modifier: Modifier = Mo
             .then(if (onTap != null) Modifier.clickable(remember { MutableInteractionSource() }, indication = null, onClick = onTap) else Modifier)
             .drawBehind { drawGrooves() },
     ) {
+        // faint unevenness in the grooves turns with the label: above a sleeve, it's what shows the turning
+        Box(Modifier.matchParentSize().graphicsLayer { rotationZ = turn.floatValue }.drawBehind { drawGrain() })
         Box(
             Modifier.align(Alignment.Center).fillMaxSize(.36f)
                 .graphicsLayer { rotationZ = turn.floatValue }   // only this layer redraws as it turns
@@ -80,6 +82,23 @@ private fun DrawScope.drawGrooves() {
     while (g < r * .95f) { drawCircle(Color.White.copy(alpha = .028f), g, c, style = Stroke(1f)); g += step }
     for (f in floatArrayOf(.52f, .68f, .82f)) drawCircle(Color.White.copy(alpha = .05f), r * f, c, style = Stroke(r * .012f))   // the gaps between tracks
     drawCircle(Color.White.copy(alpha = .08f), r * .965f, c, style = Stroke(r * .014f))   // the lip
+}
+
+private fun DrawScope.drawGrain() {
+    val r = size.minDimension / 2
+    if (r < 1f) return
+    val inner = r * .37f
+    val outer = r * .94f
+    drawCircle(
+        Brush.sweepGradient(
+            0f to Color.Transparent, .05f to Color.Transparent, .09f to Color.White.copy(alpha = .075f), .14f to Color.Transparent,
+            .31f to Color.Transparent, .36f to Color.Black.copy(alpha = .34f), .42f to Color.Transparent,
+            .56f to Color.Transparent, .61f to Color.White.copy(alpha = .055f), .66f to Color.Transparent,
+            .79f to Color.Transparent, .84f to Color.Black.copy(alpha = .28f), .9f to Color.Transparent, 1f to Color.Transparent,
+            center = center,
+        ),
+        radius = (outer + inner) / 2, center = center, style = Stroke(width = outer - inner),
+    )
 }
 
 private fun DrawScope.drawSheen() {

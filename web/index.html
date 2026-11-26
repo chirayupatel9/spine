@@ -32,6 +32,12 @@
     <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4.5 10.5V9.5a3 3 0 0 1 3-3h11M15.5 3.5l3 3-3 3M19.5 13.5v1a3 3 0 0 1-3 3h-11M8.5 20.5l-3-3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <!-- speakers: where the music plays -->
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.8" width="10" height="18.4" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.6 17.8h2.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-computer" viewBox="0 0 24 24"><rect x="4.5" y="5" width="15" height="10.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M2.8 18.8h18.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12.5" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 20.5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-headphones" viewBox="0 0 24 24"><path d="M4.5 16v-3.5a7.5 7.5 0 0 1 15 0V16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="3.5" y="13.5" width="4.2" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="16.3" y="13.5" width="4.2" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </svg>
 
   <header id="topbar">
@@ -96,7 +102,7 @@
       <button class="icon" id="pNext" title="Next"><svg><use href="#i-next"/></svg></button>
     </div>
     <div class="p-time"><span id="pPos">0:00</span><div class="p-progress"><div id="pBar"></div></div><span id="pDur">0:00</span></div>
-    <button class="device" id="pDevice" title="Choose speaker"><svg><use href="#i-speaker"/></svg><span id="pDeviceName"></span></button>
+    <button class="device" id="pDevice" title="Choose a speaker"><svg><use href="#i-speaker"/></svg><span id="pDeviceName"></span></button>
   </footer>
 
   <!-- now playing: tap (or swipe up) the player bar; swipe down or the chevron to close -->
@@ -109,7 +115,7 @@
         <button class="icon" id="npTracks" title="Album and tracks"><svg><use href="#i-list"/></svg></button>
       </header>
       <div class="np-stage np-grab">
-        <div class="vinyl" id="npVinyl"><span class="label"><img alt="" id="npLabel"></span><span class="sheen"></span></div>
+        <div class="vinyl" id="npVinyl"><span class="grain"></span><span class="label"><img alt="" id="npLabel"></span><span class="sheen"></span></div>
         <img id="npCover" class="np-cover" alt="">
       </div>
       <div class="np-body">
@@ -125,7 +131,7 @@
           <button class="icon" id="npNext" title="Next"><svg><use href="#i-next"/></svg></button>
           <button class="icon" id="npRepeat" title="Repeat"><svg><use href="#i-repeat"/></svg></button>
         </div>
-        <button class="device np-device" id="npDevice" title="Choose speaker"><svg><use href="#i-speaker"/></svg><span id="npDeviceName"></span></button>
+        <button class="np-device" id="npDevice" title="Choose a speaker"><svg class="ic"><use href="#i-speaker"/></svg><span id="npDeviceName"></span><svg class="chev"><use href="#i-down"/></svg></button>
         <div class="np-next" id="npNextWrap"><h3>Up next</h3><ol id="npQueue"></ol></div>
       </div>
     </div>
@@ -188,7 +194,8 @@
           <input id="spLink" placeholder="Add an album or playlist by its Spotify link">
           <button class="ghost" id="spAddBtn">Add</button>
         </div>
-        <label class="check" id="sdkRow" hidden><input type="checkbox" id="sdkToggle"> Use this screen as a Spotify speaker</label>
+        <label class="check" id="sdkRow" hidden><input type="checkbox" id="sdkToggle"> Play Spotify in this browser (needs Spotify Premium)</label>
+        <p class="hint" id="spFriends" hidden>Friends can use Spotify here once you add their Spotify account (name and email) under <b>User Management</b> in your app on the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify developer dashboard</a>. While the app is in Spotify's development mode, that's up to 5 people.</p>
       </section>
 
       <section id="devSec">
@@ -230,15 +237,15 @@
     </div>
   </div>
 
-  <!-- device picker -->
-  <div id="deviceSheet" class="sheet" hidden>
+  <!-- speakers: where the music plays (the speaker button on the player) -->
+  <div id="deviceSheet" class="sheet speakers" hidden>
     <div class="sheet-bg" data-close></div>
     <div class="panel small">
       <button class="close icon" data-close title="Close"><svg><use href="#i-close"/></svg></button>
       <h2>Play on</h2>
-      <div id="deviceList"></div>
-      <div class="hint">Don't see your device? Open Spotify on it once, then refresh.</div>
-      <div class="row"><button class="ghost" id="devRefresh">Refresh</button></div>
+      <div id="deviceList" class="dev-list"></div>
+      <p class="hint" id="devHint"></p>
+      <div class="row"><button class="ghost" id="devRefresh">Refresh</button><button class="ghost" id="devPick" hidden>Choose a speaker…</button></div>
     </div>
   </div>
 

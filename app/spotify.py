@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from . import artwork, db, users
+from . import artwork, config, db, users
 from .config import SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI
 
 log = logging.getLogger("albumviewer.spotify")
@@ -88,8 +88,10 @@ def me(access_token: str) -> dict:
     the Spotify developer dashboard (apps in development mode only work for those)."""
     r = _http.get(API + "/me", headers={"Authorization": f"Bearer {access_token}"})
     if r.status_code == 403:
-        raise SpotifyError(403, "This Spotify account isn't on Album Viewer's list yet. The owner adds people "
-                                "under User Management in the Spotify developer dashboard.")
+        google = "" if config.PASSWORD_SIGN_IN else ", or sign in with Google instead"
+        raise SpotifyError(403, "Spotify only lets this app work for the people its owner has added (up to 5 while "
+                                "the app is in Spotify's development mode), and this account isn't one of them yet. "
+                                f"Ask them to add your Spotify account{google}.")
     if r.status_code != 200:
         raise SpotifyError(r.status_code, f"Spotify didn't share the profile ({r.status_code})")
     return r.json()
@@ -412,6 +414,7 @@ def state(uid: int) -> dict | None:
         "image": (alb.get("images") or [{}])[0].get("url"),
         "device": (s.get("device") or {}).get("name"),
         "device_id": (s.get("device") or {}).get("id"),
+        "device_type": (s.get("device") or {}).get("type"),   # Computer, Smartphone, Speaker, TV…
         "shuffle": s.get("shuffle_state"),
         "repeat": s.get("repeat_state"),
     }
@@ -431,7 +434,7 @@ def play(uid: int, context_uri: str | None = None, offset: int | None = None, de
             # no active device: wake the first available one
             devs = devices(uid)
             if not devs:
-                raise SpotifyError(404, "No Spotify device found. Open Spotify on a phone/PC/speaker, or enable 'This screen' as a player.")
+                raise SpotifyError(404, "No Spotify speaker is on. Open Spotify on your phone, computer or speaker, then try again.")
             api(uid, "PUT", f"/me/player/play?device_id={devs[0]['id']}", content=json.dumps(body) if body else None)
         else:
             raise
