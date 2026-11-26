@@ -143,9 +143,9 @@ fun Spine(
                         .let { p -> layout(p.width, c.maxHeight) { p.place(0, -reach) } }
                 }
             }
-            .graphicsLayer { if (!vertical) shadowElevation = lift * 10.dp.toPx() }
+            .graphicsLayer { shadowElevation = lift * (if (vertical) 8.dp else 10.dp).toPx() }   // casts a shadow on its neighbours
             .clipToBounds()
-            .drawBehind { if (outFrac <= 0f || coverAlpha < 1f) drawSpine(base, ink, vertical, band, cross.toPx(), pressed || lifted) }
+            .drawBehind { if (outFrac <= 0f || coverAlpha < 1f) drawSpine(base, ink, vertical, band, cross.toPx(), pressed || lifted || lift > .5f) }
             .then(if (lifted) Modifier.border(2.dp, Palette.Accent) else Modifier)
             .hoverable(interaction)
             .combinedClickable(interactionSource = interaction, indication = null, onClick = onTap, onLongClick = onHold, onLongClickLabel = "Move")

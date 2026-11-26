@@ -222,8 +222,9 @@ body.notext .spine .lbl, body.notext .spine .mark { visibility: hidden; }
 
 /* lift: the spine under the cursor rises out of the shelf, its neighbours a little less
    (app.js sets --lift), like flicking through records in a crate. Touch: the one under your finger. */
-.spine.lift:not(.open) {   /* grows up from the floor, over the frame, in front of its neighbours */
-  z-index: 1; margin-top: calc(var(--lift, 1) * -1 * min(calc(var(--screen-h) * .07), 24px));
+.spine.lift:not(.open) {   /* grows up from the floor, over the frame, in front of its neighbours and of the
+                              glass (z-index 3), so it's lit evenly from its foot to the part over the frame */
+  z-index: 4; margin-top: calc(var(--lift, 1) * -1 * min(calc(var(--screen-h) * .07), 24px));
   box-shadow: inset -1px 0 0 rgba(0,0,0,.65), inset 1px 0 0 rgba(255,255,255,.07), 0 0 calc(var(--lift, 1) * 20px) rgba(0,0,0,.6);
 }
 .spine .cover.nocover {
@@ -512,9 +513,11 @@ body.vertical .spine.open.out { width: auto; height: calc(var(--screen-h) * var(
 body.vertical .spine.open.out .cover { width: 100%; height: var(--screen-h); box-shadow: 0 10px 24px rgba(0,0,0,.45); }
 body.vertical .spine.open.out .vinyl { translate: 0 calc(var(--screen-h) * (var(--out) - 1)); }
 body.vertical .spine.open.out .pill { left: 50%; bottom: calc(100% - var(--screen-h) * .94); }
-body.vertical .spine.lift:not(.open) {
+body.vertical .spine.lift:not(.open) {   /* slides out to the left and comes forward: lit, over its neighbours' shadow */
   margin-top: 0; margin-left: calc(var(--lift, 1) * -1 * min(calc(var(--screen-h) * .05), 18px));
-  box-shadow: inset 0 -1px 0 rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.07);
+  filter: brightness(calc(1 + var(--lift, 1) * .14));
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.07),
+    0 calc(var(--lift, 1) * 4px) calc(var(--lift, 1) * 16px) rgba(0,0,0,.75), 0 calc(var(--lift, 1) * -2px) calc(var(--lift, 1) * 10px) rgba(0,0,0,.5);
 }
 body.vertical .spine.picked { margin-top: 0; margin-left: calc(-1 * min(calc(var(--screen-h) * .03), 12px)); }
 body.vertical #hint { display: none; }
