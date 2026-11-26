@@ -1,6 +1,6 @@
 {
-  "name": "Spine",
-  "short_name": "Spine",
+  "name": "Album Viewer",
+  "short_name": "Album Viewer",
   "description": "Your albums as a row of spines on the wall: Spotify, your own music, or the demo shelf.",
   "start_url": "/",
   "scope": "/",

@@ -1,5 +1,5 @@
-// Minimal service worker: makes Spine installable and keeps the app shell available offline.
-const CACHE = "spine-shell-v3";
+// Minimal service worker: makes Album Viewer installable and keeps the app shell available offline.
+const CACHE = "albumviewer-shell-v1";
 const SHELL = ["/", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png"];
 
 self.addEventListener("install", e => {
@@ -12,7 +12,7 @@ self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
   if (url.pathname.startsWith("/art/")) {           // covers: cache first
-    e.respondWith(caches.open("spine-art").then(async c => {
+    e.respondWith(caches.open("albumviewer-art").then(async c => {
       const hit = await c.match(e.request);
       if (hit) return hit;
       const res = await fetch(e.request);

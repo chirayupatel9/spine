@@ -1,11 +1,14 @@
-/* Spine — your albums as a row of spines on a wall display. Spotify, a local library, or the demo shelf. */
+/* Album Viewer — your albums as a row of spines on a wall display. Spotify, a local library, or the demo shelf. */
 "use strict";
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const store = {
-  get(k, d) { try { const v = localStorage.getItem("spine:" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem("spine:" + k, JSON.stringify(v)); } catch {} },
+const store = {   // settings saved before the rename (under "spine:") are still read
+  get(k, d) {
+    try { const v = localStorage.getItem("albumviewer:" + k) ?? localStorage.getItem("spine:" + k); return v === null ? d : JSON.parse(v); }
+    catch { return d; }
+  },
+  set(k, v) { try { localStorage.setItem("albumviewer:" + k, JSON.stringify(v)); } catch {} },
 };
 
 const S = {
@@ -841,7 +844,7 @@ const Sdk = {
     this.loading = new Promise(resolve => {
       window.onSpotifyWebPlaybackSDKReady = () => {
         this.player = new Spotify.Player({
-          name: "Spine",
+          name: "Album Viewer",
           getOAuthToken: cb => api("/api/spotify/token").then(r => cb(r.access_token)).catch(() => {}),
           volume: 0.8,
         });
@@ -876,7 +879,7 @@ async function openDevices(retryAlbum, retryIndex) {
   try { devs = await api("/api/spotify/devices"); } catch (e) { list.innerHTML = `<div class="hint">${esc(e.message)}</div>`; return; }
   const chosen = store.get("device", null);
   const items = [];
-  if (Sdk.enabled()) items.push({ id: "sdk", name: "This screen (browser)", type: "Spine" });
+  if (Sdk.enabled()) items.push({ id: "sdk", name: "This screen (browser)", type: "Album Viewer" });
   for (const d of devs) if (d.id !== Sdk.deviceId) items.push({ id: d.id, name: d.name, type: d.type, active: d.is_active });
   if (!items.length) { list.innerHTML = '<div class="hint">No Spotify devices are online.</div>'; return; }
   list.innerHTML = "";
@@ -944,7 +947,7 @@ function renderStatus(st) {
     };
   } else {
     $("#demoStatus").textContent = (demo.error ? `Last attempt failed: ${demo.error}. ` : "") +
-      `Fills the shelf with ${demo.total} well-known albums and their 30-second previews, so you can try Spine without an account.`;
+      `Fills the shelf with ${demo.total} well-known albums and their 30-second previews, so you can try Album Viewer without an account.`;
     dBtns.innerHTML = `<button class="ghost" id="demoLoad2">Load demo shelf</button>`;
     $("#demoLoad2").onclick = loadDemo;
   }

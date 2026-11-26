@@ -1,4 +1,4 @@
-# Spine (self-hosted)
+# Album Viewer (self-hosted)
 
 Your music collection as one long row of album spines on a wall display, from **Spotify**, your **own music folder**, or a built-in **demo shelf**. Tap a spine and the album opens in place, showing its cover, and starts playing. Tap the open cover for the track list.
 
@@ -6,7 +6,7 @@ It's one small FastAPI server plus a touch-friendly web app. You can install it 
 
 ## What it does
 
-- **Local library.** Spine scans your music folder (mp3, flac, m4a, ogg, opus, wav, aiff, wma) and groups the files into albums using their tags. When tags are missing, it uses folder names (`Artist/Album/01 - Song.mp3`) and file names (`Artist - Song.mp3`). It streams the files to the browser, and you can seek within a track.
+- **Local library.** Album Viewer scans your music folder (mp3, flac, m4a, ogg, opus, wav, aiff, wma) and groups the files into albums using their tags. When tags are missing, it uses folder names (`Artist/Album/01 - Song.mp3`) and file names (`Artist - Song.mp3`). It streams the files to the browser, and you can seek within a track.
 - **Automatic cover art**, tried in this order:
   1. Art embedded in the file
   2. `cover.jpg` / `folder.jpg` / `front.png` in the album folder
@@ -17,25 +17,27 @@ It's one small FastAPI server plus a touch-friendly web app. You can install it 
 - **Spotify.**
   - Your saved albums sync onto the shelf.
   - You can add any album by pasting its link.
-  - You can play on any Spotify device (phone, PC, speaker or TV). On desktop browsers, the screen running Spine can also be the speaker.
-- **Demo shelf.** One click loads 34 well-known albums from the iTunes catalogue, with real covers and 30-second previews that play on the screen. No account is needed, so you can try Spine before connecting anything. Remove it again in **Settings → Demo shelf**.
+  - You can play on any Spotify device (phone, PC, speaker or TV). On desktop browsers, the screen running Album Viewer can also be the speaker.
+- **Demo shelf.** One click loads 34 well-known albums from the iTunes catalogue, with real covers and 30-second previews that play on the screen. No account is needed, so you can try it before connecting anything. Remove it again in **Settings → Demo shelf**.
 - **The display.**
   - The row sits in a gunmetal bezel on a dark wall, shaped like a 28″ stretched-bar screen. **Settings → Display → Shape** switches between that bar, a wider screen, or filling the window.
   - Each spine takes its colour from the cover, and its thickness from the track count. Scroll the row by swiping, dragging with the mouse, or with the mouse wheel.
   - The playing album stays open on the shelf with a *Now playing* label, and the wall glows faintly in its colour.
 - **Arrange.** By artist, decade, recently added, title, **colour** (a rainbow shelf), or **manual order**: hold a spine, then drag it to a new place. The manual order is saved on the server, so every screen shares it. A jump strip under the display (A–Z or decades) scrolls straight to a section.
 - You can search, and hide albums.
-- **Wall mode** (⤢). Spine goes fullscreen, keeps the screen awake, and hides the bars until you tap. On a stretched-bar screen the row fills it; on a tablet the bar is letterboxed unless the shape is set to *Fill the window*.
-- **Optional password** that protects the whole app when it's hosted.
+- **Wall mode** (⤢). The app goes fullscreen, keeps the screen awake, and hides the bars until you tap. On a stretched-bar screen the row fills it; on a tablet the bar is letterboxed unless the shape is set to *Fill the window*.
+- **Sign-in is always required** (see below). Every screen stays signed in for a year, or until you choose **Settings → Sign out** or change the password.
 
 ## Run it
 
 ### Docker (recommended)
 ```bash
 cp .env.example .env        # set MUSIC_PATH, PUBLIC_URL, APP_PASSWORD, Spotify keys
+mkdir -p data               # owned by you, so the container (PUID/PGID, 1000 by default) can write to it
 docker compose up -d --build
+docker compose logs         # shows the generated password if you left APP_PASSWORD empty
 ```
-Then open `PUBLIC_URL` in a browser.
+Then open `PUBLIC_URL` in a browser. The container runs as an ordinary user, not root. If it stops with "can't write to its data folder", run `sudo chown -R 1000:1000 ./data` (or set `PUID`/`PGID` in `.env` to the owner of `./data`).
 
 ### Without Docker
 ```bash
@@ -49,35 +51,71 @@ On Windows (PowerShell):
 python -m venv .venv; .venv\Scripts\pip install -r requirements.txt
 $env:MUSIC_DIR="$HOME\Music"; $env:DATA_DIR="data"; .venv\Scripts\python -m uvicorn app.main:app --port 8000
 ```
-Open http://127.0.0.1:8000 and select **Load demo shelf** to see it working straight away.
+Open http://127.0.0.1:8000, sign in, and select **Load demo shelf** to see it working straight away.
 
-## Spotify setup (5 minutes)
-1. Go to https://developer.spotify.com/dashboard, select **Create app**, and choose **Web API** and **Web Playback SDK**.
-2. Add the redirect URI `PUBLIC_URL/auth/spotify/callback`. Spotify only accepts **https** URIs, or `http://127.0.0.1:PORT` for local testing. `localhost` is **not** accepted.
-3. Put the Client ID and Client Secret in `.env` and restart Spine.
-4. Open **Settings → Connect Spotify**.
+### Signing in
+Sign-in is always on. Set `APP_PASSWORD` to choose the password (use 10 or more characters if the app can be reached from the internet). If you don't set one, a password is generated on the first start: it's printed in the log that one time and saved in `data/password.txt`.
+
+After 5 wrong passwords from one address, or 50 in total, in 15 minutes, sign-in is refused until the 15 minutes pass. Screens that are already signed in keep working. Behind a reverse proxy, set `FORWARDED_ALLOW_IPS` to the proxy's address so the limit sees each visitor's real address.
+
+## Spotify setup (about 10 minutes)
+
+What you need to know first:
+- **The Spotify account that owns the app needs Premium.** Spotify's development mode stops working if the owner's Premium lapses.
+- **At most 5 Spotify accounts can use your app**, and each must be added by hand (step 5). This is fine for personal use; Spotify describes development mode as for non-commercial use.
+- **Playing music needs Premium** on the account that listens: both starting playback from Album Viewer and using the browser as a speaker.
+
+Steps:
+1. Go to https://developer.spotify.com/dashboard, sign in, and select **Create app**.
+2. Fill in an **App name** (e.g. *Album Viewer*) and a **description**.
+3. Under **Redirect URIs**, add your `PUBLIC_URL` followed by `/auth/spotify/callback`, then select **Add**:
+   - Running on this computer: `http://127.0.0.1:8000/auth/spotify/callback`
+   - Hosted: `https://albums.yourdomain.com/auth/spotify/callback`
+
+   Spotify only accepts `https://` addresses, or plain `http://` with `127.0.0.1`. **`localhost` is not accepted.**
+4. If the form asks which APIs you'll use, tick **Web API** and **Web Playback SDK**. Accept the terms and select **Save**.
+5. Open the app's **Settings**, then the **Users Management** tab, and add the name and email of every Spotify account that will connect (including your own if it's a different account from the developer one). Accounts that aren't on this list can sign in but get "403" errors.
+6. On the app's overview page, copy the **Client ID** and the **Client secret** (you may need to select *View client secret* to reveal it). Keep the secret private; **Rotate** there issues a new one if it ever leaks.
+7. Give them to Album Viewer and restart it:
+   - Docker: put them in `.env` as `SPOTIFY_CLIENT_ID=` and `SPOTIFY_CLIENT_SECRET=`, then `docker compose up -d`.
+   - Windows without Docker, in the same PowerShell window before starting it:
+     ```powershell
+     $env:SPOTIFY_CLIENT_ID="paste-client-id"; $env:SPOTIFY_CLIENT_SECRET="paste-client-secret"; $env:PUBLIC_URL="http://127.0.0.1:8000"
+     ```
+   The log then prints the redirect URI it expects. It must match step 3 exactly.
+8. Open Album Viewer **at the same address as `PUBLIC_URL`** (`http://127.0.0.1:8000`, not `localhost:8000`, or the sign-in can't complete), then **Settings → Connect Spotify**.
 
 Notes:
-- Development-mode Spotify apps **require the app owner to have Premium** and allow **up to 5 users**. That's fine for personal use.
-- If Spotify blocks the saved-albums endpoint for your app, Spine falls back to building albums from your saved songs. You can also add albums by link.
-- Playing in the browser (Settings → "Use this screen as a Spotify speaker") works in **desktop** Chrome, Edge and Firefox. On an Android tablet, keep the Spotify app installed and pick it from the 🔈 speaker menu. Spine then acts as the remote.
+- If Spotify blocks the saved-albums endpoint for your app, Album Viewer falls back to building albums from your saved songs. You can also add albums by link.
+- Playing in the browser (Settings → "Use this screen as a Spotify speaker") works in **desktop** Chrome, Edge and Firefox. On an Android tablet, keep the Spotify app installed and pick it from the 🔈 speaker menu. Album Viewer then acts as the remote.
 
 ## Hosting it
-- **At home (simplest).** Run Spine on a PC or server in your house. Open `http://<server-ip>:8000` from the tablet for local music. Spotify login needs `PUBLIC_URL` to be https or 127.0.0.1, so use one of the options below for the Spotify part.
-- **HTTPS via Cloudflare Tunnel or Tailscale Funnel.** Gives you `https://spine.yourdomain.com` without opening any ports. Set `PUBLIC_URL` to that address and set `APP_PASSWORD`.
-- **VPS.** Put Caddy in front (`spine.yourdomain.com { reverse_proxy localhost:8000 }`) for automatic HTTPS. Your music has to be on the VPS, or synced to it with rclone or Syncthing.
+- **At home (simplest).** Run it on a PC or server in your house. Open `http://<server-ip>:8000` from the tablet for local music. Spotify sign-in needs `PUBLIC_URL` to be https or 127.0.0.1, so use one of the options below for the Spotify part.
+- **HTTPS via Cloudflare Tunnel or Tailscale Funnel.** Gives you `https://albums.yourdomain.com` without opening any ports. Set `PUBLIC_URL` to that address and choose a strong `APP_PASSWORD`.
+- **VPS.** Put Caddy in front (`albums.yourdomain.com { reverse_proxy localhost:8000 }`) for automatic HTTPS, and set `FORWARDED_ALLOW_IPS`. Your music has to be on the VPS, or synced to it with rclone or Syncthing.
+
+Keep `data/` backed up: it holds the database (saved order, hidden albums, Spotify sign-in), cached covers and the generated password.
 
 ## Install as an app
 - **Android tablet.** Open the URL in Chrome, then **⋮ → Add to Home screen / Install app**. It opens fullscreen like a native app. For a wall tablet, use Android's *screen pinning* or a kiosk launcher such as Fully Kiosk Browser.
-- **Windows.** Open the URL in Edge or Chrome, then **⋯ → Apps → Install this site as an app**. For a kiosk screen, run `msedge --kiosk https://spine.yourdomain.com --edge-kiosk-type=fullscreen`.
+- **Windows.** Open the URL in Edge or Chrome, then **⋯ → Apps → Install this site as an app**. For a kiosk screen, run `msedge --kiosk https://albums.yourdomain.com --edge-kiosk-type=fullscreen`.
+
+## Tests
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+The tests use a throwaway data folder and generated audio files, and never touch the network. GitHub Actions runs them on every push, checks the JavaScript parses, and builds the Docker image and waits for it to report healthy.
 
 ## API (if you want to script it)
+Every `/api/` call needs the sign-in cookie (`POST /login` with `password`).
+
 | Method | Path | |
 |---|---|---|
 | GET | `/api/albums` | shelf (`?source=local|spotify|demo&include_hidden=true`) |
 | GET | `/api/albums/{id}` | album + tracks |
 | PATCH | `/api/albums/{id}` | `{"hidden": true}` |
-| POST | `/api/albums/{id}/art` | upload a cover (multipart `file`) |
+| POST | `/api/albums/{id}/art` | upload a cover (multipart `file`, `MAX_UPLOAD_MB` max) |
 | POST | `/api/albums/{id}/art/search` | `{"artist","album","song"}` online lookup |
 | PUT | `/api/order` | manual shelf order (`{"ids": [...]}`) |
 | POST | `/api/demo/load` | load the demo shelf (`DELETE /api/demo` removes it) |
@@ -85,13 +123,16 @@ Notes:
 | GET | `/api/local/stream/{track_id}` | audio stream (supports Range) |
 | POST | `/api/spotify/sync` / `add` / `play` / `control` / `transfer` | Spotify |
 | GET | `/api/status` | scan / sync progress |
+| GET | `/healthz` | health check (no sign-in) |
 
 ## Layout
 ```
-app/main.py      routes, password gate, static files
+app/main.py      routes, sign-in, request limits, static files
+app/config.py    settings from the environment, generated password
 app/library.py   folder scan, tag reading, album grouping
 app/artwork.py   embedded/folder/iTunes/MusicBrainz art, spine colours
 app/spotify.py   OAuth, saved-album sync, playback control
 app/demo.py      demo shelf from the iTunes catalogue (covers + 30-second previews)
 web/             the shelf UI (vanilla JS PWA, no build step)
+tests/           pytest suite
 ```

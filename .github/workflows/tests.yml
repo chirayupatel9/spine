@@ -1,0 +1,39 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+      - name: Check the web app's JavaScript parses
+        run: node --check web/app.js && node --check web/sw.js
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the container, then wait for it to report healthy
+        run: |
+          docker build -t album-viewer .
+          docker run -d --name av -e APP_PASSWORD=ci-password-123 -p 8000:8000 album-viewer
+          for i in $(seq 1 30); do
+            s=$(docker inspect -f '{{.State.Health.Status}}' av); echo "health: $s"
+            [ "$s" = healthy ] && break; sleep 2
+          done
+          [ "$(docker inspect -f '{{.State.Health.Status}}' av)" = healthy ]
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/albums)" = 401
+          test "$(docker exec av id -u)" != 0

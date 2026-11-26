@@ -15,7 +15,7 @@ from mutagen import File as MutagenFile
 from . import artwork, db
 from .config import AUDIO_EXTS, MUSIC_DIR
 
-log = logging.getLogger("spine.library")
+log = logging.getLogger("albumviewer.library")
 
 status = {"scanning": False, "phase": "idle", "files": 0, "albums": 0, "art_done": 0, "art_total": 0,
           "last_scan": None, "error": None}

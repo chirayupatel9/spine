@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "spine",
+      "name": "album-viewer",
       "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": ["-c", "import os; os.environ.setdefault('MUSIC_DIR', 'music'); os.environ.setdefault('DATA_DIR', 'data'); import uvicorn; uvicorn.run('app.main:app', host='127.0.0.1', port=int(os.environ.get('PORT', '8000')))"],
       "port": 8000

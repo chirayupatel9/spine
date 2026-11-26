@@ -1,25 +1,31 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import hashlib
 import hmac
+import html
+import json
 import logging
 import mimetypes
 import secrets
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import artwork, db, demo, library, spotify
-from .config import APP_PASSWORD, ART_DIR, MUSIC_DIR, PUBLIC_URL, RESCAN_MINUTES, SECRET_KEY, SPOTIFY_REDIRECT_URI
+from .config import (APP_PASSWORD, ART_DIR, MAX_UPLOAD_MB, MUSIC_DIR, PASSWORD_FILE, PASSWORD_FROM_ENV,
+                     PASSWORD_GENERATED, PUBLIC_URL, RESCAN_MINUTES, SECRET_KEY, SPOTIFY_REDIRECT_URI)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-log = logging.getLogger("spine")
+log = logging.getLogger("albumviewer")
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+MAX_BODY = MAX_UPLOAD_MB * 1024 * 1024
 mimetypes.add_type("audio/flac", ".flac")
 mimetypes.add_type("audio/mp4", ".m4a")
 mimetypes.add_type("audio/ogg", ".opus")
@@ -40,57 +46,146 @@ async def _background():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = asyncio.create_task(_background())
-    log.info("Spine running at %s  (music: %s)", PUBLIC_URL, MUSIC_DIR)
+    log.info("Album Viewer running at %s  (music: %s)", PUBLIC_URL, MUSIC_DIR)
+    if PASSWORD_GENERATED:
+        log.warning("Login password: %s  (saved in %s; set APP_PASSWORD to choose your own)", APP_PASSWORD, PASSWORD_FILE)
+    elif not PASSWORD_FROM_ENV:
+        log.info("Login password is in %s (set APP_PASSWORD to choose your own)", PASSWORD_FILE)
+    if len(APP_PASSWORD) < 10:
+        log.warning("APP_PASSWORD is shorter than 10 characters. Use a longer one if the app can be reached from the internet.")
     if spotify.configured():
         log.info("Spotify redirect URI (add this in your Spotify app settings): %s", SPOTIFY_REDIRECT_URI)
     yield
     task.cancel()
 
 
-app = FastAPI(title="Spine", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title="Album Viewer", lifespan=lifespan, docs_url=None, redoc_url=None)
 
 
-# ---------------------------------------------------------------- password gate
+# ---------------------------------------------------------------- login (always required)
+
+COOKIE = "av_auth"
+OPEN_PATHS = ("/login", "/manifest.webmanifest", "/icon", "/healthz")
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "frame-ancestors 'none'",
+}
+
 
 def _auth_token() -> str:
-    return hmac.new(SECRET_KEY.encode(), f"spine:{APP_PASSWORD}".encode(), hashlib.sha256).hexdigest()
+    # Changes when the password or SECRET_KEY changes, which signs every screen out.
+    return hmac.new(SECRET_KEY.encode(), f"albumviewer:{APP_PASSWORD}".encode(), hashlib.sha256).hexdigest()
 
 
-OPEN_PATHS = ("/login", "/manifest.webmanifest", "/icon", "/healthz")
+def _signed_in(request: Request) -> bool:
+    return hmac.compare_digest(request.cookies.get(COOKIE, "").encode(), _auth_token().encode())
 
 
 @app.middleware("http")
-async def password_gate(request: Request, call_next):
-    if APP_PASSWORD and not request.url.path.startswith(OPEN_PATHS):
-        if not hmac.compare_digest(request.cookies.get("spine_auth", ""), _auth_token()):
-            if request.url.path.startswith("/api/"):
-                return JSONResponse({"detail": "login required"}, status_code=401)
-            return RedirectResponse("/login")
-    return await call_next(request)
+async def gate(request: Request, call_next):
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > MAX_BODY:
+        response = JSONResponse({"detail": f"Request too large ({MAX_UPLOAD_MB} MB max)"}, status_code=413)
+    elif not request.url.path.startswith(OPEN_PATHS) and not _signed_in(request):
+        if request.url.path.startswith("/api/"):
+            response = JSONResponse({"detail": "login required"}, status_code=401)
+        else:
+            response = RedirectResponse("/login")
+    else:
+        response = await call_next(request)
+    for k, v in SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)
+    return response
 
 
-LOGIN_HTML = """<!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Spine</title><style>body{margin:0;height:100vh;display:grid;place-items:center;background:#16161a;color:#eee;font:16px system-ui}
-form{display:flex;flex-direction:column;gap:12px;width:260px}input,button{padding:12px;border-radius:10px;border:1px solid #333;background:#222;color:#eee;font-size:16px}
-button{background:#e8e2d4;color:#111;border:0;font-weight:600}p{color:#e66;margin:0}</style></head><body>
-<form method=post><h2 style="margin:0 0 8px;font-weight:600;letter-spacing:.04em">SPINE</h2>
-<input type=password name=password placeholder=Password autofocus>{err}<button>Enter</button></form></body></html>"""
+# Failed sign-ins: 5 per address, and 50 in total, in any 15 minutes. The total cap holds even if
+# the attacker spreads guesses over many addresses; screens already signed in are unaffected.
+LOGIN_WINDOW = 15 * 60
+LOGIN_MAX_PER_ADDRESS = 5
+LOGIN_MAX_TOTAL = 50
+_fails: dict[str, list[float]] = {}
+_fails_lock = threading.Lock()
+
+
+def _login_wait(addr: str, now: float) -> int:
+    """Seconds before `addr` may try again; 0 if it may try now."""
+    with _fails_lock:
+        for k in list(_fails):
+            _fails[k] = [t for t in _fails[k] if now - t < LOGIN_WINDOW]
+            if not _fails[k]:
+                del _fails[k]
+        waits = []
+        mine = _fails.get(addr, [])
+        if len(mine) >= LOGIN_MAX_PER_ADDRESS:
+            waits.append(mine[-LOGIN_MAX_PER_ADDRESS] + LOGIN_WINDOW - now)
+        every = sorted(t for ts in _fails.values() for t in ts)
+        if len(every) >= LOGIN_MAX_TOTAL:
+            waits.append(every[-LOGIN_MAX_TOTAL] + LOGIN_WINDOW - now)
+        return int(max(waits)) + 1 if waits else 0
+
+
+def _login_failed(addr: str, now: float) -> None:
+    with _fails_lock:
+        _fails.setdefault(addr, []).append(now)
+
+
+def reset_login_limits() -> None:
+    with _fails_lock:
+        _fails.clear()
+
+
+LOGIN_HTML = """<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Album Viewer</title><link rel=icon href=/icon.svg type=image/svg+xml><style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0c0a08;color:rgba(255,255,255,.92);font:16px Inter,system-ui,sans-serif}
+form{display:flex;flex-direction:column;gap:12px;width:min(280px,86vw)}
+h1{margin:0 0 10px;font-size:15px;font-weight:700;letter-spacing:.16em}
+input{padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#1c1a17;color:inherit;font:inherit}
+input:focus{outline:1px solid rgba(240,79,35,.55)}
+button{padding:12px;border-radius:999px;border:0;background:#f04f23;color:#fff;font:inherit;font-weight:600;cursor:pointer}
+p{color:#ff8a6b;margin:0;font-size:14px}</style></head><body>
+<form method=post action=/login><h1>ALBUM VIEWER</h1>
+<input type=password name=password placeholder=Password autocomplete=current-password autofocus required>{err}<button>Sign in</button></form>
+</body></html>"""
+
+
+def _login_page(err: str = "") -> str:
+    return LOGIN_HTML.replace("{err}", f"<p>{html.escape(err)}</p>" if err else "")
 
 
 @app.get("/login", include_in_schema=False)
 def login_page():
-    return HTMLResponse(LOGIN_HTML.replace("{err}", ""))
+    return HTMLResponse(_login_page())
 
 
 @app.post("/login", include_in_schema=False)
 async def login(request: Request):
+    addr = request.client.host if request.client else "unknown"
+    now = time.time()
+    wait = _login_wait(addr, now)
+    if wait:   # checked before the password, so a locked-out guesser learns nothing
+        mins = max(1, round(wait / 60))
+        return HTMLResponse(_login_page(f"Too many attempts. Try again in {mins} minute{'' if mins == 1 else 's'}."),
+                            status_code=429, headers={"Retry-After": str(wait)})
     form = await request.form()
-    if APP_PASSWORD and hmac.compare_digest(str(form.get("password", "")), APP_PASSWORD):
+    if hmac.compare_digest(str(form.get("password", "")).encode(), APP_PASSWORD.encode()):
+        with _fails_lock:
+            _fails.pop(addr, None)
         r = RedirectResponse("/", status_code=303)
-        r.set_cookie("spine_auth", _auth_token(), max_age=60 * 60 * 24 * 365, httponly=True, samesite="lax",
+        r.set_cookie(COOKIE, _auth_token(), max_age=60 * 60 * 24 * 365, httponly=True, samesite="lax",
                      secure=PUBLIC_URL.startswith("https"))
         return r
-    return HTMLResponse(LOGIN_HTML.replace("{err}", "<p>Wrong password</p>"), status_code=401)
+    _login_failed(addr, now)
+    await asyncio.sleep(0.4)
+    return HTMLResponse(_login_page("Wrong password"), status_code=401)
+
+
+@app.post("/logout", include_in_schema=False)
+def logout():
+    r = RedirectResponse("/login", status_code=303)
+    r.delete_cookie(COOKIE)
+    return r
 
 
 @app.get("/healthz", include_in_schema=False)
@@ -169,7 +264,9 @@ def update_album(album_id: str, body: dict = Body(...)):
 
 @app.post("/api/albums/{album_id}/art")
 async def upload_art(album_id: str, file: UploadFile = File(...)):
-    data = await file.read()
+    data = await file.read(MAX_BODY + 1)
+    if len(data) > MAX_BODY:
+        raise HTTPException(413, f"Image is too large ({MAX_UPLOAD_MB} MB max)")
     saved = artwork.save_art(album_id, data)
     if not saved:
         raise HTTPException(400, "Not an image")
@@ -272,7 +369,7 @@ def spotify_login():
 @app.get("/auth/spotify/callback", include_in_schema=False)
 def spotify_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
-        return RedirectResponse(f"/?spotify_error={error}")
+        return RedirectResponse(f"/?spotify_error={quote(error)}")
     if not code or not state or state != request.cookies.get("sp_state"):
         raise HTTPException(400, "Invalid OAuth state")
     _sp(spotify.exchange_code, code)
@@ -332,6 +429,8 @@ def spotify_control(body: dict = Body(...)):
 
 @app.post("/api/spotify/transfer")
 def spotify_transfer(body: dict = Body(...)):
+    if not body.get("device_id"):
+        raise HTTPException(400, "device_id is required")
     _sp(spotify.transfer, body["device_id"], body.get("play", True))
     return {"ok": True}
 

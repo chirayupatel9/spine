@@ -1,6 +1,6 @@
 """Demo shelf: real albums from the iTunes catalogue with 30-second previews.
 
-Lets Spine run as a working model with no Spotify account and no music folder. The
+Lets Album Viewer run as a working model with no Spotify account and no music folder. The
 covers are cached like any other artwork, so spines get their colour the same way.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import artwork, db
 from .config import ART_DIR
 
-log = logging.getLogger("spine.demo")
+log = logging.getLogger("albumviewer.demo")
 
 # iTunes collection IDs (UK storefront), resolved once with the Search API.
 DEMO_IDS = [

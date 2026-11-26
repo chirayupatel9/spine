@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0c0a08">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Spine</title>
+  <title>Album Viewer</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -30,7 +30,7 @@
   </svg>
 
   <header id="topbar">
-    <div class="brand">SPINE</div>
+    <div class="brand">ALBUM VIEWER</div>
     <nav class="seg" id="sourceSeg" aria-label="Source">
       <button data-source="all" class="on">All</button>
       <button data-source="spotify">Spotify</button>
@@ -59,7 +59,7 @@
         <div id="row" role="list" aria-label="Albums"></div>
         <div id="empty" hidden>
           <h2>Your collection, back on the wall.</h2>
-          <p>Load the demo shelf, connect Spotify, or point Spine at a music folder.</p>
+          <p>Load the demo shelf, connect Spotify, or point Album Viewer at a music folder.</p>
           <div class="row center">
             <button class="primary" id="demoLoadBtn">Load demo shelf</button>
             <button class="ghost" onclick="openSettings()">Settings</button>
@@ -170,6 +170,11 @@
         <label class="check"><input type="checkbox" id="showHidden"> Show hidden albums</label>
         <label class="check"><input type="checkbox" id="spineNames" checked> Show text on spines</label>
         <label class="check"><input type="checkbox" id="glowToggle" checked> Glow the wall in the playing album's colour</label>
+      </section>
+
+      <section>
+        <h3>This screen</h3>
+        <form method="post" action="/logout" class="row"><button class="ghost" type="submit">Sign out</button></form>
       </section>
     </div>
   </div>

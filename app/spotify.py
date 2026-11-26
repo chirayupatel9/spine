@@ -15,7 +15,7 @@ import httpx
 from . import artwork, db
 from .config import SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI
 
-log = logging.getLogger("spine.spotify")
+log = logging.getLogger("albumviewer.spotify")
 
 API = "https://api.spotify.com/v1"
 SCOPES = " ".join([

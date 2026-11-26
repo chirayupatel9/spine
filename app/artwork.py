@@ -21,9 +21,9 @@ from PIL import Image
 
 from .config import ART_DIR, ART_LOOKUP_ONLINE, IMAGE_EXTS
 
-log = logging.getLogger("spine.art")
+log = logging.getLogger("albumviewer.art")
 
-USER_AGENT = "SpineShelf/1.0 (personal self-hosted music shelf)"
+USER_AGENT = "AlbumViewer/1.0 (personal self-hosted music shelf)"
 _http = httpx.Client(timeout=15, headers={"User-Agent": USER_AGENT}, follow_redirects=True)
 _mb_lock = threading.Lock()
 _mb_last = 0.0
