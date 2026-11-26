@@ -18,6 +18,10 @@ USER albumviewer
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status != 200)"
+# Which commit this is (deploy/bad-omen/autodeploy.sh passes it in); /healthz reports it. Last, so
+# a new value only rebuilds this tiny layer.
+ARG VERSION=dev
+ENV ALBUM_VIEWER_VERSION=$VERSION
 # Proxy headers are trusted only from FORWARDED_ALLOW_IPS (default 127.0.0.1). Set it to your
 # reverse proxy's address so sign-in limits see real client addresses.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

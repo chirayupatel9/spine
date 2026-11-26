@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import mimetypes
+import os
 import secrets
 import threading
 import time
@@ -409,7 +410,9 @@ def whoami(request: Request):
 
 @app.get("/healthz", include_in_schema=False)
 def healthz():
-    return {"ok": True}
+    # the commit this build is (set when deploy/bad-omen/autodeploy.sh builds it), so you can see
+    # which version is live
+    return {"ok": True, "version": os.environ.get("ALBUM_VIEWER_VERSION", "dev")}
 
 
 def _fingerprint(value: str) -> str | None:

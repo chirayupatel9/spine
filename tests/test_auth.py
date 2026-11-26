@@ -26,7 +26,7 @@ def test_open_paths_cannot_be_used_as_a_way_around(client):
 
 
 def test_open_pages_work_without_sign_in(client):
-    assert client.get("/healthz").json() == {"ok": True}
+    assert client.get("/healthz").json() == {"ok": True, "version": "dev"}   # the commit, when autodeploy builds it
     assert client.get("/login").status_code == 200
     assert client.get("/manifest.webmanifest").status_code == 200
     assert client.get("/icon.svg").status_code == 200

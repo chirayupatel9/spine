@@ -156,7 +156,7 @@ Set it up once, as the user that runs Album Viewer (it uses `http://127.0.0.1:80
 bash ~/album-viewer/deploy/bad-omen/install.sh
 journalctl --user -u album-viewer-deploy -e    # what it did
 ```
-It pulls from GitHub (nothing reaches into your server), so it works behind a tunnel or a firewall.
+It pulls from GitHub (nothing reaches into your server), so it works behind a tunnel or a firewall. `https://<your address>/healthz` says which commit is live (`version`).
 
 ## Install as an app
 - **Android tablet.** Open the URL in Chrome, then **⋮ → Add to Home screen / Install app**. It opens fullscreen like a native app. For a wall tablet, use Android's *screen pinning* or a kiosk launcher such as Fully Kiosk Browser. To install it from Google Play instead, see [Android app](#android-app).

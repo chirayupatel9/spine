@@ -1,6 +1,9 @@
 services:
   album-viewer:
-    build: .
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}   # the commit, when deploy/bad-omen/autodeploy.sh builds it
     container_name: album-viewer
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"     # must be able to write ./data
