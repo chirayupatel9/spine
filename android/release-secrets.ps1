@@ -1,47 +1,54 @@
 <#
-  One-time setup for automatic Android releases (.github/workflows/android.yml). Puts the upload
-  key, its password and the Play service account's key into the GitHub repository's secrets, where
-  only that workflow can use them. Run it yourself, in a terminal:
+  One-time setup for automatic Android releases (.github/workflows/android.yml): puts the upload
+  key and its password into the GitHub repository's secrets, where only that workflow can use
+  them. Google Play access needs no key (the workflow signs in to Google as a service account).
 
-    .\android\release-secrets.ps1 -ServiceAccountKey "$HOME\Downloads\<the downloaded key>.json"
+    pwsh -NoProfile -File .\android\release-secrets.ps1
 
-  It checks the password with keytool first, then asks for it once more at GitHub's own prompt.
+  It asks for the password once, checks that it opens the key, and hands it straight to GitHub.
   Nothing is shown, and nothing is saved on this computer.
 #>
 param(
-    [Parameter(Mandatory = $true)][string]$ServiceAccountKey,
     [string]$Repo = "chirayupatel9/spine",
     [string]$Keystore = (Join-Path $PSScriptRoot "upload.keystore"),
     [string]$Keytool = "C:\Program Files\Java\jdk-17\bin\keytool.exe"
 )
 $ErrorActionPreference = "Stop"
-
-$key = Get-Content -Raw $ServiceAccountKey | ConvertFrom-Json
-if ($key.type -ne "service_account" -or -not $key.client_email) { throw "$ServiceAccountKey isn't a service account's JSON key." }
 if (-not (Test-Path $Keystore)) { throw "No upload key at $Keystore" }
+
+# A token in GH_TOKEN would be used instead of your GitHub sign-in (and an old one fails); this
+# script ignores it. Your Windows settings stay as they are.
+Remove-Item Env:GH_TOKEN, Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
 
 gh auth status *> $null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Sign in to GitHub first:"
+    Write-Host "First, sign in to GitHub (it shows a code, then opens github.com to enter it):"
     gh auth login --hostname github.com --git-protocol https --web
     if ($LASTEXITCODE -ne 0) { throw "Not signed in to GitHub." }
 }
 
-Write-Host "`nThe upload key's password, to check it opens the key:"
-& $Keytool -list -keystore $Keystore > $null
-if ($LASTEXITCODE -ne 0) { throw "That password doesn't open $Keystore. Nothing was changed." }
-
-[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $Keystore))) | gh secret set ANDROID_KEYSTORE_BASE64 --repo $Repo
-if ($LASTEXITCODE -ne 0) { throw "Couldn't save the upload key." }
-Write-Host "`nNow the same password again, at GitHub's prompt:"
-gh secret set ANDROID_KEYSTORE_PASSWORD --repo $Repo
-if ($LASTEXITCODE -ne 0) { throw "Couldn't save the password." }
-Get-Content -Raw $ServiceAccountKey | gh secret set PLAY_SERVICE_ACCOUNT_JSON --repo $Repo
-if ($LASTEXITCODE -ne 0) { throw "Couldn't save the service account's key." }
-
-Write-Host "`nDone. The release workflow can sign and publish now."
-Write-Host "Play Console must let this service account release: $($key.client_email)"
-if ((Read-Host "Delete the downloaded key file now? GitHub has it (y/N)") -match '^[yY]') {
-    Remove-Item $ServiceAccountKey
-    Write-Host "Deleted $ServiceAccountKey"
+# Give gh a secret on its standard input, exactly as is (no line break added).
+function Set-RepoSecret([string]$Name, [string]$Value) {
+    $psi = [Diagnostics.ProcessStartInfo]::new("gh", "secret set $Name --repo $Repo")
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $p = [Diagnostics.Process]::Start($psi)
+    $p.StandardInput.Write($Value)
+    $p.StandardInput.Close()
+    $p.WaitForExit()
+    if ($p.ExitCode -ne 0) { throw "Couldn't save $Name." }
 }
+
+$secure = Read-Host "`nThe upload key's password" -AsSecureString
+$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+try {
+    $env:AV_UPLOAD_KEY_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    & $Keytool -list -keystore $Keystore -storepass:env AV_UPLOAD_KEY_PASSWORD *> $null
+    if ($LASTEXITCODE -ne 0) { throw "That password doesn't open $Keystore. Nothing was saved; run it again." }
+    Set-RepoSecret ANDROID_KEYSTORE_BASE64 ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $Keystore))))
+    Set-RepoSecret ANDROID_KEYSTORE_PASSWORD $env:AV_UPLOAD_KEY_PASSWORD
+} finally {
+    Remove-Item Env:AV_UPLOAD_KEY_PASSWORD -ErrorAction SilentlyContinue
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+}
+Write-Host "`nDone: GitHub can sign Album Viewer's releases now. You can close this tab."

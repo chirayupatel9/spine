@@ -2,12 +2,15 @@ name: android
 
 # Every change to the Android app that reaches main is built, signed with the upload key and
 # released to Google Play's internal testing track, where testers' phones update on their own.
-# "Run workflow" on the Actions tab releases by hand. Until the secrets below are set, it only
-# checks that the app builds (README, "Android app").
+# "Run workflow" on the Actions tab releases by hand. Until the upload key is in the repository's
+# secrets, it only checks that the app builds (README, "Android app").
 #
 #   ANDROID_KEYSTORE_BASE64     the upload key (android/upload.keystore), base64-encoded
 #   ANDROID_KEYSTORE_PASSWORD   its password
-#   PLAY_SERVICE_ACCOUNT_JSON   the JSON key of a service account Play Console lets release to testing tracks
+#
+# Google Play takes the release from the play-publisher service account. GitHub signs in as it
+# without any stored Google key (workload identity federation): Google trusts this repository's
+# GitHub sign-in tokens, and nothing else.
 
 on:
   push:
@@ -17,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write   # GitHub's sign-in token for Google
 
 concurrency:
   group: android-release   # one release at a time, in order
@@ -27,7 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CAN_SIGN: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' }}
-      CAN_PUBLISH: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+      GOOGLE_PROVIDER: projects/38245494826/locations/global/workloadIdentityPools/github/providers/spine
+      PLAY_SERVICE_ACCOUNT: play-publisher@album-viewer-515917.iam.gserviceaccount.com
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,23 +74,34 @@ jobs:
           echo "$out" | head -1
           echo "$out" | grep -q "^jar verified"
 
+      - name: Sign in to Google Play
+        id: google
+        if: env.CAN_SIGN == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GOOGLE_PROVIDER }}
+          service_account: ${{ env.PLAY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          create_credentials_file: false
+
       - uses: actions/setup-python@v5
-        if: env.CAN_SIGN == 'true' && env.CAN_PUBLISH == 'true'
+        if: env.CAN_SIGN == 'true'
         with:
           python-version: "3.12"
 
       - name: Release to internal testing
-        if: env.CAN_SIGN == 'true' && env.CAN_PUBLISH == 'true'
+        if: env.CAN_SIGN == 'true'
         env:
-          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          PLAY_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
         run: |
-          pip install --quiet google-auth requests
+          pip install --quiet requests
           python android/publish.py android/app/build/outputs/bundle/release/app-release.aab \
             --track internal --name "$VERSION_CODE · $(git log -1 --format=%s)"
 
       - name: Say what was skipped
-        if: env.CAN_SIGN != 'true' || env.CAN_PUBLISH != 'true'
-        run: echo "::notice::Built only. Add the upload key and the Play service account to the repository's secrets to sign and release (README, 'Android app')."
+        if: env.CAN_SIGN != 'true'
+        run: echo "::notice::Built only. Put the upload key in the repository's secrets to sign and release (README, 'Android app')."
 
       - name: Remove the upload key
         if: always()

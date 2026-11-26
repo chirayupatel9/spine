@@ -159,15 +159,14 @@ Keep `data/` backed up: it holds the database (saved order, hidden albums, Spoti
 - **Sign-in:** Google or Spotify in a browser tab, or the server's password where Google sign-in isn't set up. The session is kept in the app's private storage.
 
 ### Releasing to Google Play automatically
-Every change to `android/` that reaches `main` is built, signed with your upload key and released to the **internal testing** track by `.github/workflows/android.yml`; testers' phones then update from Play on their own. The version code is the number of commits, so it goes up by itself. Until the setup below is done, the workflow only checks that the app builds.
+Every change to `android/` that reaches `main` is built, signed with your upload key and released to the **internal testing** track by `.github/workflows/android.yml`; testers' phones then update from Play on their own. The version code is the number of commits, so it goes up by itself. **Actions → android → Run workflow** on GitHub releases without a new change.
 
-One-time setup (about 10 minutes):
-1. In https://console.cloud.google.com (the project you use for Google sign-in will do), enable the **Google Play Android Developer API**.
-2. Under **IAM & Admin → Service accounts**, create a service account (for example *play-publisher*; it needs no roles), then **Keys → Add key → Create new key → JSON**. A `.json` file downloads.
-3. In Play Console, open **Users and permissions → Invite new users**. Enter the service account's email, and under **App permissions** add Album Viewer with **View app information** and **Release apps to testing tracks**.
-4. In `android/`, run `.\release-secrets.ps1 -ServiceAccountKey <the .json file>`. It signs you in to GitHub if needed, checks the upload key's password, and stores three secrets in the repository: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `PLAY_SERVICE_ACCOUNT_JSON`. Then it offers to delete the downloaded file.
+How it's set up (once):
+- **Google Play** takes releases from a service account, `play-publisher` in the *Album Viewer* Google Cloud project. In Play Console (**Users and permissions**) it may only view Album Viewer and release it to testing tracks.
+- **GitHub signs in as that service account without a key** (workload identity federation): the project trusts GitHub's sign-in tokens for this repository only (an identity pool `github` with a provider `spine` whose condition is `assertion.repository == "chirayupatel9/spine"`), and the repository may act as `play-publisher` (*Workload Identity User*). The names are in the workflow; none of it is secret.
+- **The upload key and its password** are the repository's secrets `ANDROID_KEYSTORE_BASE64` and `ANDROID_KEYSTORE_PASSWORD`. To set them again (a new key, say), run `pwsh -NoProfile -File android/release-secrets.ps1`: it signs you in to GitHub, asks for the password once, checks it opens the key, and hands both to GitHub. If the key ever leaks, Play Console can reset the upload key; the key Play signs the app with stays with Google.
 
-To release without a new change, use **Actions → android → Run workflow** on GitHub. The upload key then also lives in GitHub's encrypted secrets. If it ever leaks, Play Console can reset the upload key; the key Play signs the app with stays with Google.
+Until the two secrets exist, the workflow only checks that the app builds.
 
 ### Building and signing by hand
 

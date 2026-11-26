@@ -1,8 +1,9 @@
 """Publish an Android App Bundle to a Google Play track (internal testing unless told otherwise)
 through the Google Play Developer API, as a service account.
 
-The release workflow (.github/workflows/android.yml) runs it after building. It works on any
-computer too:
+The release workflow (.github/workflows/android.yml) runs it after building, with an access token
+from GitHub's keyless sign-in to Google (PLAY_ACCESS_TOKEN). Elsewhere, a service account's JSON
+key works too:
 
     pip install google-auth requests
     PLAY_SERVICE_ACCOUNT_JSON="$(cat key.json)" python android/publish.py app-release.aab
@@ -69,15 +70,23 @@ def main() -> int:
     ap.add_argument("--track", default="internal", help="internal, alpha, beta or production")
     ap.add_argument("--name", help="the release's name in Play Console (at most 50 characters)")
     a = ap.parse_args()
+    token = os.environ.get("PLAY_ACCESS_TOKEN", "").strip()
     key = os.environ.get("PLAY_SERVICE_ACCOUNT_JSON", "").strip()
-    if not key:
-        print("PLAY_SERVICE_ACCOUNT_JSON isn't set: it holds the service account's JSON key.", file=sys.stderr)
+    if token:   # already signed in (the release workflow)
+        import requests
+        session = requests.Session()
+        session.headers["Authorization"] = f"Bearer {token}"
+    elif key:
+        from google.auth.transport.requests import AuthorizedSession
+        from google.oauth2 import service_account
+        session = AuthorizedSession(service_account.Credentials.from_service_account_info(
+            json.loads(key), scopes=["https://www.googleapis.com/auth/androidpublisher"]))
+    else:
+        print("Set PLAY_ACCESS_TOKEN (a token for the androidpublisher scope) or PLAY_SERVICE_ACCOUNT_JSON "
+              "(a service account's JSON key).", file=sys.stderr)
         return 2
-    from google.auth.transport.requests import AuthorizedSession
-    from google.oauth2 import service_account
-    creds = service_account.Credentials.from_service_account_info(json.loads(key), scopes=["https://www.googleapis.com/auth/androidpublisher"])
     try:
-        code = publish(AuthorizedSession(creds), a.package, a.bundle, a.track, a.name)
+        code = publish(session, a.package, a.bundle, a.track, a.name)
     except PlayError as e:
         print(e, file=sys.stderr)
         return 1
