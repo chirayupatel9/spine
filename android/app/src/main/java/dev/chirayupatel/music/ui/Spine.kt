@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -97,6 +98,8 @@ fun Spine(
     out: Boolean = false,           // open and playing: its record is out of the sleeve
     onRecordTap: () -> Unit = {},
     onPutBack: () -> Unit = {},     // the × on the open cover
+    onTouch: (Boolean) -> Unit = {},// under a finger (or the pointer) or not: the phone stack lifts a copy of it
+    ghost: Boolean = false,         // that lifted copy: lit, and not touchable itself
 ) {
     val opened by animateDpAsState(if (open) cross else thickness, tween(OPEN_MS, easing = OpenEasing), label = "spine")
     // The record comes out once the album has opened, and goes back in with it.
@@ -115,7 +118,8 @@ fun Spine(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val hovered by interaction.collectIsHoveredAsState()
-    val touched = (pressed || hovered) && !open && !lifted
+    val touched = (pressed || hovered) && !open && !lifted && !ghost
+    LaunchedEffect(touched) { onTouch(touched) }
     val lift by animateFloatAsState(if (touched) 1f else 0f, tween(if (touched) 140 else 240, easing = OutEasing), label = "lift")
     // Each animation uses the timing of the way *into* its state: the cover comes in, the label
     // waits for it to leave before returning.
@@ -134,7 +138,8 @@ fun Spine(
             .layout { m, c ->
                 // Lifted, it grows out of the shelf, up over the frame on the wall, out to the left in the
                 // stack, while its foot stays put: moving it instead would leave a dark gap under it.
-                val reach = (lift * if (vertical) minOf(cross.toPx() * .05f, 18.dp.toPx()) else minOf(cross.toPx() * .07f, 24.dp.toPx())).roundToInt()
+                // (In the phone stack the screen's rounded corners would clip it, so there the stack lifts a copy instead.)
+                val reach = if (vertical) 0 else (lift * minOf(cross.toPx() * .07f, 24.dp.toPx())).roundToInt()
                 when {
                     reach <= 0 -> m.measure(c).let { p -> layout(p.width, p.height) { p.place(0, 0) } }
                     vertical -> m.measure(c.copy(minWidth = c.maxWidth + reach, maxWidth = c.maxWidth + reach))
@@ -143,12 +148,12 @@ fun Spine(
                         .let { p -> layout(p.width, c.maxHeight) { p.place(0, -reach) } }
                 }
             }
-            .graphicsLayer { shadowElevation = lift * (if (vertical) 8.dp else 10.dp).toPx() }   // casts a shadow on its neighbours
+            .graphicsLayer { if (!vertical) shadowElevation = lift * 10.dp.toPx() }   // casts a shadow on its neighbours
             .clipToBounds()
-            .drawBehind { if (outFrac <= 0f || coverAlpha < 1f) drawSpine(base, ink, vertical, band, cross.toPx(), pressed || lifted || lift > .5f) }
+            .drawBehind { if (outFrac <= 0f || coverAlpha < 1f) drawSpine(base, ink, vertical, band, cross.toPx(), pressed || lifted || lift > .5f || ghost) }
             .then(if (lifted) Modifier.border(2.dp, Palette.Accent) else Modifier)
-            .hoverable(interaction)
-            .combinedClickable(interactionSource = interaction, indication = null, onClick = onTap, onLongClick = onHold, onLongClickLabel = "Move")
+            .then(if (ghost) Modifier else Modifier.hoverable(interaction)
+                .combinedClickable(interactionSource = interaction, indication = null, onClick = onTap, onLongClick = onHold, onLongClickLabel = "Move"))
             .semantics { contentDescription = "${a.artist}, ${a.title}" },
     ) {
         if (labelAlpha > 0f) {

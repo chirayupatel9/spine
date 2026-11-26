@@ -238,6 +238,7 @@ function addCover(el, a) {
 }
 
 function render() {
+  Ghost.hide(true);
   layout();
   document.body.classList.toggle("notext", !store.get("spineNames", true));
   const row = $("#row");
@@ -493,6 +494,13 @@ const Lift = {
   els: [], at: null, x: 0, y: 0, mouse: false,
   set(center, wave = true) {
     if (reduceMotion.matches || document.body.classList.contains("arranging")) center = null;
+    if (S.vertical) {   // phones: the stack stays clipped to the screen's rounded corners, so a copy lifts instead
+      for (const el of this.els) el.classList.remove("lift");
+      this.els = [];
+      Ghost.show(center && !center.classList.contains("open") ? center : null);
+      this.at = center;
+      return;
+    }
     const next = new Map();
     if (center && !center.classList.contains("open")) {
       next.set(center, 1);
@@ -507,12 +515,48 @@ const Lift = {
     this.els = [...next.keys()];
     this.at = center;
   },
-  clear() { if (this.els.length) this.set(null); this.at = null; },
+  clear() { if (this.els.length || Ghost.el) this.set(null); this.at = null; },
   // The shelf moved under a still cursor: lift whatever is under it now.
   follow() {
     if (!this.mouse) return;
     const el = Drag.moved ? null : document.elementFromPoint(this.x, this.y)?.closest("#row .spine") || null;
     if (el !== this.at) this.set(el);
+  },
+};
+
+/* Phones: a copy of the lifted strip, laid over it and a little wider, reaching out to the left over
+   the frame with a shadow, as the wall shelf's spines rise over theirs. The stack itself keeps its
+   rounded corners, which is why the strip can't simply grow out of it. */
+const Ghost = {
+  el: null, src: null, leaving: [],
+  show(src) {
+    if (src === this.src) return;
+    this.hide();
+    if (!src) return;
+    const r = src.getBoundingClientRect(), box = $("#screen").getBoundingClientRect();
+    if (r.top < box.top - 1 || r.bottom > box.bottom + 1) return;   // only a strip wholly in view
+    const reach = Math.round(Math.max(0, Math.min(S.H * 0.06, 18, r.left - 4)));   // out over the frame, not off the screen
+    const g = src.cloneNode(true);
+    g.classList.remove("lift", "arrive");
+    g.classList.add("ghost");
+    g.setAttribute("aria-hidden", "true"); g.removeAttribute("title"); g.tabIndex = -1;
+    Object.assign(g.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" });
+    g.dataset.left = r.left; g.dataset.width = r.width;
+    document.body.appendChild(g);
+    void g.offsetWidth;
+    g.classList.add("up");
+    g.style.left = r.left - reach + "px"; g.style.width = r.width + reach + "px";
+    this.el = g; this.src = src;
+  },
+  hide(now = false) {
+    const g = this.el;
+    this.el = this.src = null;
+    if (now) { this.leaving.forEach(x => x.remove()); this.leaving = []; g?.remove(); return; }
+    if (!g) return;
+    g.classList.remove("up");
+    g.style.left = g.dataset.left + "px"; g.style.width = g.dataset.width + "px";
+    this.leaving.push(g);
+    setTimeout(() => { g.remove(); this.leaving = this.leaving.filter(x => x !== g); }, 180);
   },
 };
 
@@ -591,6 +635,7 @@ async function detail(id, fresh = false) {
 const row = $("#row");
 
 row.addEventListener("click", e => {
+  Ghost.hide(true);   // a tap opens the album: its lifted copy goes at once
   if (Drag.suppressClick) { Drag.suppressClick = false; return; }
   const el = e.target.closest(".spine");
   if (!el) return;
@@ -677,7 +722,10 @@ row.addEventListener("wheel", e => {
   row.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 32 : 1);
 }, { passive: false });
 
-row.addEventListener("scroll", () => { if (!idxRaf) idxRaf = requestAnimationFrame(markIndex); }, { passive: true });
+row.addEventListener("scroll", () => {
+  if (Ghost.el) { Ghost.hide(); Lift.at = null; }   // the strip moves on; the copy doesn't follow it
+  if (!idxRaf) idxRaf = requestAnimationFrame(markIndex);
+}, { passive: true });
 row.addEventListener("contextmenu", e => { if (S.sort === "manual") e.preventDefault(); });
 row.addEventListener("keydown", e => {
   const fwd = S.vertical ? "ArrowDown" : "ArrowRight", back = S.vertical ? "ArrowUp" : "ArrowLeft";

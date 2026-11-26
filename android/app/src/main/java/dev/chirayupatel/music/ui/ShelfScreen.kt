@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -83,7 +85,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -94,6 +98,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.min
@@ -108,6 +113,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlin.math.min as minOf2
 
 @Composable
@@ -278,10 +284,19 @@ private fun VerticalStack(vm: AppViewModel) {
     val density = LocalDensity.current
     val view = LocalView.current
     var crossPx by remember { mutableIntStateOf(0) }
+    // The strip under a finger lifts out over the frame. The stack is clipped to the screen's rounded
+    // corners, so a lit copy of it is drawn above everything, a little wider to the left.
+    var liftedId by remember { mutableStateOf<String?>(null) }
+    var stackAt by remember { mutableStateOf(Offset.Zero) }
+    var screenAt by remember { mutableStateOf(Offset.Zero) }
 
+    Box(Modifier.fillMaxSize().onGloballyPositioned { stackAt = it.positionInRoot() }) {
     Row(Modifier.fillMaxSize().padding(start = 10.dp, top = 4.dp, bottom = 10.dp)) {
         Bezel(Modifier.weight(1f).fillMaxHeight(), radius = 16.dp, pad = 6.dp) {
-            BoxWithConstraints(Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(Color(0xFF050504)).onSizeChanged { crossPx = it.width }) {
+            BoxWithConstraints(
+                Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(Color(0xFF050504))
+                    .onSizeChanged { crossPx = it.width }.onGloballyPositioned { screenAt = it.positionInRoot() },
+            ) {
                 val cross = maxWidth
                 val cp = with(density) { cross.toPx() }
                 LazyColumn(state = state, modifier = Modifier.fillMaxSize().reorderGestures(reorder, vertical = true), verticalArrangement = Arrangement.Center) {
@@ -297,6 +312,7 @@ private fun VerticalStack(vm: AppViewModel) {
                             out = a.id == vm.openId && a.id == vm.nowAlbumId && vm.nowTitle.isNotEmpty(),
                             onRecordTap = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.toggle() },
                             onPutBack = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.putBack() },
+                            onTouch = { t -> if (t) liftedId = a.id else if (liftedId == a.id) liftedId = null },
                             modifier = if (a.id == reorder.key) Modifier.held(reorder, a.id, vertical = true) else Modifier.animateItem(),
                         )
                     }
@@ -305,6 +321,30 @@ private fun VerticalStack(vm: AppViewModel) {
             }
         }
         Rail(vm, state, Modifier.width(36.dp).fillMaxHeight())
+    }
+    // Only a strip wholly in view lifts, and not while arranging or once it's open.
+    val lifted = liftedId?.takeIf { reorder.key == null && it != vm.openId }?.let { id ->
+        val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
+        val a = list.firstOrNull { it.id == id }
+        if (a != null && info != null && info.offset >= 0 && info.offset + info.size <= state.layoutInfo.viewportSize.height) a to info else null
+    }
+    var shown by remember { mutableStateOf<Pair<Album, LazyListItemInfo>?>(null) }
+    if (lifted != null) shown = lifted
+    val reach by animateDpAsState(if (lifted != null) 12.dp else 0.dp, tween(if (lifted != null) 150 else 120, easing = OutEasing), label = "lift")
+    val g = shown
+    if (g != null && reach > 0.dp) {
+        val (a, info) = g
+        Box(
+            Modifier.offset { IntOffset((screenAt.x - stackAt.x - reach.toPx()).roundToInt(), (screenAt.y - stackAt.y + info.offset).roundToInt()) }
+                .size(width = with(density) { crossPx.toDp() } + reach, height = with(density) { info.size.toDp() })
+                .shadow(8.dp * (reach / 12.dp)),
+        ) {
+            Spine(
+                a, open = false, vertical = true, cross = with(density) { crossPx.toDp() }, thickness = with(density) { info.size.toDp() },
+                pill = null, playing = false, artUrl = null, onTap = {}, ghost = true,
+            )
+        }
+    }
     }
 
     // Put the opened album's top where its finished slot will sit centred (a square, or taller with
