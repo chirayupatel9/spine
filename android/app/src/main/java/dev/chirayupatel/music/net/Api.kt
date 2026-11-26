@@ -8,9 +8,11 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.FormBody
@@ -174,14 +176,20 @@ class Api(context: Context) {
         post("/api/spotify/play", buildJsonObject { put("uri", uri); put("offset", offset) }.toString())
     suspend fun spotifyControl(action: String) = post("/api/spotify/control", buildJsonObject { put("action", action) }.toString())
 
+    /** The manual shelf order, shared by every screen (the web app reads the same list). */
+    suspend fun saveOrder(ids: List<String>) =
+        send("PUT", "/api/order", buildJsonObject { putJsonArray("ids") { ids.forEach { add(it) } } }.toString())
+
     fun streamUrl(trackId: String) = url("/api/local/stream/" + Uri.encode(trackId))
 
     private suspend fun getText(path: String): String = withContext(Dispatchers.IO) {
         client.newCall(Request.Builder().url(url(path)).build()).execute().use { r -> check(r); r.body?.string().orEmpty() }
     }
 
-    private suspend fun post(path: String, body: String = "{}") = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url(url(path)).post(body.toRequestBody("application/json".toMediaType())).build()
+    private suspend fun post(path: String, body: String = "{}") = send("POST", path, body)
+
+    private suspend fun send(method: String, path: String, body: String) = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(url(path)).method(method, body.toRequestBody("application/json".toMediaType())).build()
         client.newCall(req).execute().use { r -> check(r) }
     }
 

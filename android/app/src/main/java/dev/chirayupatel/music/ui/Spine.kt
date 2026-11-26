@@ -11,7 +11,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -63,6 +64,7 @@ import dev.chirayupatel.music.net.Album
  * across); otherwise the wall shelf (upright spines, text runs down). `cross` is the shelf's size
  * across: an open album becomes a square that size, its cover sliding out as it opens.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Spine(
     a: Album,
@@ -75,6 +77,8 @@ fun Spine(
     artUrl: String?,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
+    onHold: (() -> Unit)? = null,   // hold to start dragging it to a new place
+    lifted: Boolean = false,        // being dragged right now
 ) {
     val size by animateDpAsState(if (open) cross else thickness, tween(OPEN_MS, easing = OpenEasing), label = "spine")
     val base = remember(a.color) { parseColor(a.color) }
@@ -98,8 +102,9 @@ fun Spine(
         modifier
             .then(if (vertical) Modifier.fillMaxWidth().height(size) else Modifier.fillMaxHeight().width(size))
             .clipToBounds()
-            .drawBehind { drawSpine(base, ink, vertical, band, cross.toPx(), pressed) }
-            .clickable(interactionSource = interaction, indication = null, onClick = onTap)
+            .drawBehind { drawSpine(base, ink, vertical, band, cross.toPx(), pressed || lifted) }
+            .then(if (lifted) Modifier.border(2.dp, Palette.Accent) else Modifier)
+            .combinedClickable(interactionSource = interaction, indication = null, onClick = onTap, onLongClick = onHold, onLongClickLabel = "Move")
             .semantics { contentDescription = "${a.artist}, ${a.title}" },
     ) {
         if (labelAlpha > 0f) {

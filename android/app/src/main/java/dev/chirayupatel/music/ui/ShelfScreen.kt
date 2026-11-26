@@ -252,8 +252,9 @@ private fun SortMenu(vm: AppViewModel) {
 
 @Composable
 private fun VerticalStack(vm: AppViewModel) {
-    val list = vm.visible
     val state = rememberLazyListState()
+    val reorder = rememberShelfReorder(vm, state)
+    val list = reorder.list(vm.visible)
     val density = LocalDensity.current
     val view = LocalView.current
     var crossPx by remember { mutableIntStateOf(0) }
@@ -263,7 +264,7 @@ private fun VerticalStack(vm: AppViewModel) {
             BoxWithConstraints(Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(Color(0xFF050504)).onSizeChanged { crossPx = it.width }) {
                 val cross = maxWidth
                 val cp = with(density) { cross.toPx() }
-                LazyColumn(state = state, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+                LazyColumn(state = state, modifier = Modifier.fillMaxSize().reorderGestures(reorder, vertical = true), verticalArrangement = Arrangement.Center) {
                     items(list, key = { it.id }) { a ->
                         Spine(
                             a, open = a.id == vm.openId, vertical = true, cross = cross,
@@ -271,7 +272,9 @@ private fun VerticalStack(vm: AppViewModel) {
                             pill = pillFor(vm, a.id), playing = vm.isPlaying && vm.nowAlbumId == a.id,
                             artUrl = vm.artUrl(a.art),
                             onTap = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.tap(a) },
-                            modifier = Modifier.animateItem(),
+                            onHold = { reorder.begin(a, list) },
+                            lifted = a.id == reorder.key,
+                            modifier = if (a.id == reorder.key) Modifier.held(reorder, a.id, vertical = true) else Modifier.animateItem(),
                         )
                     }
                 }
@@ -361,8 +364,9 @@ private fun pillFor(vm: AppViewModel, id: String): String? = when {
 
 @Composable
 private fun WallShelf(vm: AppViewModel) {
-    val list = vm.visible
     val state = rememberLazyListState()
+    val reorder = rememberShelfReorder(vm, state)
+    val list = reorder.list(vm.visible)
     val density = LocalDensity.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
@@ -372,7 +376,7 @@ private fun WallShelf(vm: AppViewModel) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Bezel(Modifier.fillMaxWidth(), radius = if (vm.wallMode) 0.dp else 14.dp, pad = if (vm.wallMode) 0.dp else 14.dp) {
                 Box(Modifier.fillMaxWidth().height(screenH).clip(RoundedCornerShape(3.dp)).background(Color(0xFF050504))) {
-                    LazyRow(state = state, modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center) {
+                    LazyRow(state = state, modifier = Modifier.fillMaxSize().reorderGestures(reorder, vertical = false), horizontalArrangement = Arrangement.Center) {
                         items(list, key = { it.id }) { a ->
                             Spine(
                                 a, open = a.id == vm.openId, vertical = false, cross = screenH,
@@ -380,7 +384,9 @@ private fun WallShelf(vm: AppViewModel) {
                                 pill = pillFor(vm, a.id), playing = vm.isPlaying && vm.nowAlbumId == a.id,
                                 artUrl = vm.artUrl(a.art),
                                 onTap = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); vm.tap(a) },
-                                modifier = Modifier.animateItem(),
+                                onHold = { reorder.begin(a, list) },
+                                lifted = a.id == reorder.key,
+                                modifier = if (a.id == reorder.key) Modifier.held(reorder, a.id, vertical = false) else Modifier.animateItem(),
                             )
                         }
                     }

@@ -135,7 +135,7 @@ Keep `data/` backed up: it holds the database (saved order, hidden albums, Spoti
 
 ## Android app
 `android/` is a native Android app (Kotlin and Jetpack Compose) that talks to your server:
-- **Phones:** the vertical stack of spines with momentum scrolling and an A–Z rail you slide along. Tap a spine to open it into its cover and play it.
+- **Phones:** the vertical stack of spines with momentum scrolling and an A–Z rail you slide along. Tap a spine to open it into its cover and play it. Hold one, then drag it to rearrange the shelf. The order is saved on the server, so every screen shares it; holding an album while another arrangement is showing switches to your own order, starting from what's on screen.
 - **Tablets and landscape:** the wall shelf in its bezel.
 - **Playback:** local and demo albums play in a background service (Media3), with lock-screen and notification controls, artwork, a draggable position bar, and Bluetooth and headphone buttons. Spotify albums are started on your Spotify device through the server.
 - **Instant start:** it opens on the last shelf it saw, then refreshes.

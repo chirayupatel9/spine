@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
 import java.io.IOException
 import java.text.Collator
@@ -164,7 +165,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun chooseSource(s: String) { source = s; prefs.edit().putString("source", s).apply() }
-    fun chooseSort(s: Sort) { sort = s; prefs.edit().putString("sort", s.name).apply() }
+    fun chooseSort(s: Sort) {
+        if (s == Sort.MANUAL && sort != Sort.MANUAL) message = "Hold an album, then drag it to a new place"
+        sort = s; prefs.edit().putString("sort", s.name).apply()
+    }
+
+    /**
+     * Save a dragged-into-place order. `shown` is the order on screen; albums the current filter or
+     * search hides keep their slots, as on the web. The shelf switches to the manual order, starting
+     * from what was on screen, so nothing jumps.
+     */
+    fun saveOrder(shown: List<String>) {
+        val shownSet = shown.toHashSet()
+        var k = 0
+        val ids = arrange(albums, Sort.MANUAL).map { if (it.id in shownSet && k < shown.size) shown[k++] else it.id }
+        val pos = ids.withIndex().associate { (i, id) -> id to i }
+        albums = albums.map { it.copy(pos = pos[it.id]) }
+        if (sort != Sort.MANUAL) { sort = Sort.MANUAL; prefs.edit().putString("sort", Sort.MANUAL.name).apply() }
+        val snapshot = albums
+        viewModelScope.launch {
+            try {
+                api.saveOrder(ids)
+                withContext(Dispatchers.IO) { cacheFile.writeText(api.json.encodeToString(ListSerializer(Album.serializer()), snapshot)) }
+            } catch (e: IOException) {
+                if (e is NotSignedIn) signedIn = false else message = "Couldn't save the order: ${e.message}"
+            }
+        }
+    }
 
     /* ------------------------------------------------ the shelf */
 
