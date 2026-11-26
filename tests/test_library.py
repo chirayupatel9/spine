@@ -25,6 +25,7 @@ def test_cover_art_is_served(signed_in, library_scanned):
     art = _local(signed_in)["First Album"]["art"]
     r = signed_in.get(art)
     assert r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff"   # stored as JPEG
+    assert r.headers["cache-control"] == "private, max-age=604800"     # never kept by Cloudflare
 
 
 def test_stream_supports_seeking(signed_in, library_scanned):

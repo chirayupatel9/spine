@@ -77,10 +77,26 @@ def test_guesses_spread_over_many_addresses_hit_the_total_cap(client, main):
     assert client.post("/login", data={"password": PASSWORD}, follow_redirects=False).status_code == 429
 
 
-def test_app_shell_is_always_revalidated(signed_in):
-    for path in ("/", "/style.css", "/app.js", "/sw.js", "/manifest.webmanifest"):
-        assert signed_in.get(path).headers.get("cache-control") == "no-cache", path
-    assert "no-cache" not in signed_in.get("/icon.svg").headers.get("cache-control", "")
+def test_page_loads_code_under_versioned_addresses(signed_in, main):
+    html = signed_in.get("/").text
+    v = main.asset_version()
+    assert f'href="/style.css?v={v}"' in html and f'src="/app.js?v={v}"' in html
+    for path in (f"/style.css?v={v}", f"/app.js?v={v}"):     # unique per deploy: keep for a year
+        assert signed_in.get(path).headers["cache-control"] == "private, max-age=31536000, immutable", path
+
+
+def test_signed_in_content_is_never_stored_by_shared_caches(signed_in):
+    for path in ("/", "/style.css", "/app.js", "/sw.js", "/api/albums", "/api/status"):
+        cc = signed_in.get(path).headers["cache-control"]
+        assert cc.startswith("private") and ("no-cache" in cc or "max-age" in cc), (path, cc)
+    assert signed_in.get("/manifest.webmanifest").headers["cache-control"] == "no-cache"   # public anyway
+
+
+def test_refusals_are_never_cached(client):
+    # A cached "go to sign-in" for /app.js or a cover would break the app for signed-in screens.
+    for path in ("/", "/app.js", "/style.css?v=abc", "/art/whatever.jpg", "/api/albums"):
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code in (302, 307, 401) and r.headers["cache-control"] == "no-store", path
 
 
 def test_security_headers(client):

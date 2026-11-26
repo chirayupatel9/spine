@@ -72,9 +72,13 @@ OPEN_PATHS = frozenset({
     "/login", "/healthz", "/manifest.webmanifest", "/.well-known/assetlinks.json",
     "/icon.svg", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png",
 })
-# The app shell: browsers must check for a newer copy on every load, or a deploy can leave a device
-# (the Android app included) running stale CSS or JavaScript against fresh HTML.
-NO_CACHE_PATHS = frozenset({"/style.css", "/app.js", "/sw.js", "/manifest.webmanifest"})
+# Caching. Cloudflare (or any shared cache) must never keep anything behind sign-in, nor a sign-in
+# redirect: a cached redirect for /app.js would break the app for everyone. Signed-in responses are
+# therefore "private", refusals "no-store". The page loads style.css and app.js under addresses that
+# change with every deploy (?v=...), so no cache can hand a device last week's code: those may be
+# kept for a year; the bare addresses are checked on every load.
+VERSIONED_ASSETS = ("style.css", "app.js")
+SHELL_PATHS = frozenset({"/style.css", "/app.js", "/sw.js", "/manifest.webmanifest"})
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
@@ -92,22 +96,39 @@ def _signed_in(request: Request) -> bool:
     return hmac.compare_digest(request.cookies.get(COOKIE, "").encode(), _auth_token().encode())
 
 
+def asset_version() -> str:
+    """Changes whenever style.css or app.js changes (including a deploy), so their URLs do too."""
+    h = hashlib.sha1()
+    for name in VERSIONED_ASSETS:
+        st = (WEB_DIR / name).stat()
+        h.update(f"{name}:{st.st_size}:{st.st_mtime_ns};".encode())
+    return h.hexdigest()[:12]
+
+
 @app.middleware("http")
 async def gate(request: Request, call_next):
+    path = request.url.path
     length = request.headers.get("content-length", "")
     if length.isdigit() and int(length) > MAX_BODY:
         response = JSONResponse({"detail": f"Request too large ({MAX_UPLOAD_MB} MB max)"}, status_code=413)
-    elif request.url.path not in OPEN_PATHS and not _signed_in(request):
-        if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    elif path not in OPEN_PATHS and not _signed_in(request):
+        if path.startswith("/api/"):
             response = JSONResponse({"detail": "login required"}, status_code=401)
         else:
             response = RedirectResponse("/login")
+        response.headers["Cache-Control"] = "no-store"
     else:
         response = await call_next(request)
+        if path in SHELL_PATHS:
+            versioned = path.lstrip("/") in VERSIONED_ASSETS and request.query_params.get("v")
+            response.headers["Cache-Control"] = "max-age=31536000, immutable" if versioned else "no-cache"
+        if path not in OPEN_PATHS:   # signed-in content: the browser may keep it, a shared cache may not
+            cc = response.headers.get("Cache-Control", "no-cache")
+            if "private" not in cc and "no-store" not in cc:
+                response.headers["Cache-Control"] = "private, " + cc
     for k, v in SECURITY_HEADERS.items():
         response.headers.setdefault(k, v)
-    if request.url.path in NO_CACHE_PATHS:
-        response.headers.setdefault("Cache-Control", "no-cache")
     return response
 
 
@@ -338,7 +359,7 @@ def art(name: str):
     path = (ART_DIR / Path(name).name)
     if not path.exists():
         raise HTTPException(404)
-    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=604800"})
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
 
 
 # ---------------------------------------------------------------- local library
@@ -476,7 +497,10 @@ def spotify_transfer(body: dict = Body(...)):
 
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+    v = asset_version()
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace('href="/style.css"', f'href="/style.css?v={v}"').replace('src="/app.js"', f'src="/app.js?v={v}"')
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/", StaticFiles(directory=WEB_DIR), name="web")
