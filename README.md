@@ -56,7 +56,7 @@ Open http://127.0.0.1:8000, sign in, and select **Load demo shelf** to see it wo
 ### Signing in
 Sign-in is always on. Set `APP_PASSWORD` to choose the password (use 10 or more characters if the app can be reached from the internet). If you don't set one, a password is generated on the first start: it's printed in the log that one time and saved in `data/password.txt`.
 
-After 5 wrong passwords from one address, or 50 in total, in 15 minutes, sign-in is refused until the 15 minutes pass. Screens that are already signed in keep working. Behind a reverse proxy, set `FORWARDED_ALLOW_IPS` to the proxy's address so the limit sees each visitor's real address.
+After 5 wrong passwords from one address, or 50 in total, in 15 minutes, sign-in is refused until the 15 minutes pass. Screens that are already signed in keep working. Behind a reverse proxy or tunnel, set `FORWARDED_ALLOW_IPS` to the proxy's address, or the Docker network it runs on, so the limit sees each visitor's real address. Never set it to `*`: the app would then believe whatever address a visitor writes into the `X-Forwarded-For` header, and the per-address limit would be easy to dodge.
 
 ## Spotify setup (about 10 minutes)
 
@@ -91,8 +91,41 @@ Notes:
 
 ## Hosting it
 - **At home (simplest).** Run it on a PC or server in your house. Open `http://<server-ip>:8000` from the tablet for local music. Spotify sign-in needs `PUBLIC_URL` to be https or 127.0.0.1, so use one of the options below for the Spotify part.
-- **HTTPS via Cloudflare Tunnel or Tailscale Funnel.** Gives you `https://albums.yourdomain.com` without opening any ports. Set `PUBLIC_URL` to that address and choose a strong `APP_PASSWORD`.
+- **Only your own devices, over HTTPS: Tailscale Serve.** On the server, `tailscale serve --bg 8000` gives `https://<machine>.<tailnet>.ts.net` with a real certificate, reachable only from devices on your Tailscale. Set `PUBLIC_URL` to that address.
+- **Public, through a Cloudflare Tunnel** (no open ports; see below). Gives you `https://albums.yourdomain.com`. Choose a strong `APP_PASSWORD`.
 - **VPS.** Put Caddy in front (`albums.yourdomain.com { reverse_proxy localhost:8000 }`) for automatic HTTPS, and set `FORWARDED_ALLOW_IPS`. Your music has to be on the VPS, or synced to it with rclone or Syncthing.
+
+### Public through a Cloudflare Tunnel
+This runs the tunnel as a second container next to the app, so it needs no open port and doesn't touch any other tunnel on the machine. On the server, with `cloudflared` signed in to your Cloudflare account (`cloudflared tunnel login`), from the folder with `docker-compose.yml`:
+```bash
+cloudflared tunnel create album-viewer                                   # prints the tunnel ID
+cloudflared tunnel route dns album-viewer albums.yourdomain.com          # adds the DNS record
+mkdir -p tunnel && cp ~/.cloudflared/<tunnel-id>.json tunnel/credentials.json && chmod 600 tunnel/*
+```
+`tunnel/config.yml`:
+```yaml
+tunnel: <tunnel-id>
+credentials-file: /etc/cloudflared/credentials.json
+ingress:
+  - hostname: albums.yourdomain.com
+    service: http://album-viewer:8000
+  - service: http_status:404
+```
+`docker-compose.override.yml` (Compose reads it automatically):
+```yaml
+services:
+  tunnel:
+    image: cloudflare/cloudflared:2026.11.2
+    restart: unless-stopped
+    user: "1000:1000"                 # must be able to read tunnel/
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes: ["./tunnel:/etc/cloudflared:ro"]
+    depends_on: { album-viewer: { condition: service_healthy } }
+networks:   # pinned, so the line below can name it
+  default:
+    ipam: { config: [{ subnet: 172.31.240.0/24 }] }
+```
+In `.env`, set `PUBLIC_URL=https://albums.yourdomain.com` and `FORWARDED_ALLOW_IPS=172.31.240.0/24`, then `docker compose up -d`. If nothing else needs the app's own port, you can also stop publishing it: add `ports: !reset []` under `album-viewer` in the override. `tunnel/` holds the tunnel's secret; git ignores it, and so does `docker-compose.override.yml`.
 
 Keep `data/` backed up: it holds the database (saved order, hidden albums, Spotify sign-in), cached covers and the generated password.
 
