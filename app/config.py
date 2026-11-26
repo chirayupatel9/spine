@@ -35,6 +35,13 @@ RESCAN_MINUTES = int(_env("RESCAN_MINUTES", "60") or 0)
 # Largest request body accepted (cover uploads are the only big ones)
 MAX_UPLOAD_MB = int(_env("MAX_UPLOAD_MB", "15") or 15)
 
+# The Android app (a Trusted Web Activity). Served at /.well-known/assetlinks.json so Android lets
+# that app open this site full screen. ANDROID_CERT_SHA256 lists the SHA-256 fingerprints of the
+# certificates the app is signed with, comma-separated: Google Play's app-signing key, plus your
+# upload key for builds you install yourself.
+ANDROID_PACKAGE = _env("ANDROID_PACKAGE")
+ANDROID_CERT_SHA256 = [f.strip() for f in _env("ANDROID_CERT_SHA256").split(",") if f.strip()]
+
 AUDIO_EXTS = {".mp3", ".flac", ".m4a", ".mp4", ".aac", ".ogg", ".oga", ".opus", ".wav", ".aif", ".aiff", ".wma", ".alac"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 

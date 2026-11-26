@@ -19,8 +19,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 
 from . import artwork, db, demo, library, spotify
-from .config import (APP_PASSWORD, ART_DIR, MAX_UPLOAD_MB, MUSIC_DIR, PASSWORD_FILE, PASSWORD_FROM_ENV,
-                     PASSWORD_GENERATED, PUBLIC_URL, RESCAN_MINUTES, SECRET_KEY, SPOTIFY_REDIRECT_URI)
+from .config import (ANDROID_CERT_SHA256, ANDROID_PACKAGE, APP_PASSWORD, ART_DIR, MAX_UPLOAD_MB, MUSIC_DIR,
+                     PASSWORD_FILE, PASSWORD_FROM_ENV, PASSWORD_GENERATED, PUBLIC_URL, RESCAN_MINUTES, SECRET_KEY,
+                     SPOTIFY_REDIRECT_URI)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("albumviewer")
@@ -65,7 +66,12 @@ app = FastAPI(title="Album Viewer", lifespan=lifespan, docs_url=None, redoc_url=
 # ---------------------------------------------------------------- login (always required)
 
 COOKIE = "av_auth"
-OPEN_PATHS = ("/login", "/manifest.webmanifest", "/icon", "/healthz")
+# Exact paths only: prefix matching would let "/login/../app.js" through, since the static file
+# server resolves the "..".
+OPEN_PATHS = frozenset({
+    "/login", "/healthz", "/manifest.webmanifest", "/.well-known/assetlinks.json",
+    "/icon.svg", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png",
+})
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
@@ -88,7 +94,7 @@ async def gate(request: Request, call_next):
     length = request.headers.get("content-length", "")
     if length.isdigit() and int(length) > MAX_BODY:
         response = JSONResponse({"detail": f"Request too large ({MAX_UPLOAD_MB} MB max)"}, status_code=413)
-    elif not request.url.path.startswith(OPEN_PATHS) and not _signed_in(request):
+    elif request.url.path not in OPEN_PATHS and not _signed_in(request):
         if request.url.path.startswith("/api/"):
             response = JSONResponse({"detail": "login required"}, status_code=401)
         else:
@@ -191,6 +197,32 @@ def logout():
 @app.get("/healthz", include_in_schema=False)
 def healthz():
     return {"ok": True}
+
+
+def _fingerprint(value: str) -> str | None:
+    """'aa bb..', 'AABB..' or 'AA:BB:..' -> 'AA:BB:..'; None if it isn't a SHA-256 fingerprint."""
+    hexdigits = "".join(c for c in value if c in "0123456789abcdefABCDEF").upper()
+    if len(hexdigits) != 64 or len(value.replace(":", "").replace(" ", "")) != 64:
+        return None
+    return ":".join(hexdigits[i:i + 2] for i in range(0, 64, 2))
+
+
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+def assetlinks():
+    """Digital Asset Links: tells Android the Album Viewer app may open this site full screen."""
+    prints = []
+    for raw in ANDROID_CERT_SHA256:
+        fp = _fingerprint(raw)
+        if fp:
+            prints.append(fp)
+        else:
+            log.warning("Ignoring ANDROID_CERT_SHA256 entry that isn't a SHA-256 fingerprint: %r", raw)
+    if not ANDROID_PACKAGE or not prints:
+        raise HTTPException(404)
+    return JSONResponse([{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {"namespace": "android_app", "package_name": ANDROID_PACKAGE, "sha256_cert_fingerprints": prints},
+    }])
 
 
 # ---------------------------------------------------------------- albums

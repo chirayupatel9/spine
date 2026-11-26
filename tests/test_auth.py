@@ -19,6 +19,12 @@ def test_static_files_need_sign_in(client):
     assert client.get("/app.js", follow_redirects=False).status_code in (302, 307)
 
 
+def test_open_paths_cannot_be_used_as_a_way_around(client):
+    # "%2e%2e" reaches the app as "..", which the static file server would resolve to /app.js
+    for path in ("/login/%2e%2e/app.js", "/icon.svg/%2e%2e/app.js", "/healthz/%2e%2e/index.html", "/login/x"):
+        assert client.get(path, follow_redirects=False).status_code in (302, 307), path
+
+
 def test_open_pages_work_without_sign_in(client):
     assert client.get("/healthz").json() == {"ok": True}
     assert client.get("/login").status_code == 200

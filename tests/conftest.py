@@ -22,8 +22,12 @@ MUSIC = TMP / "music"
 DATA = TMP / "data"
 PASSWORD = "correct horse battery"
 
+ANDROID_PACKAGE = "dev.example.albums"
+ANDROID_PRINTS = ("ab" * 32, ":".join(["0F"] * 32))   # bare lowercase, and already colon-separated
+
 os.environ.update(MUSIC_DIR=str(MUSIC), DATA_DIR=str(DATA), APP_PASSWORD=PASSWORD, ART_LOOKUP_ONLINE="0",
-                  RESCAN_MINUTES="0", PUBLIC_URL="http://127.0.0.1:8000", MAX_UPLOAD_MB="1")
+                  RESCAN_MINUTES="0", PUBLIC_URL="http://127.0.0.1:8000", MAX_UPLOAD_MB="1",
+                  ANDROID_PACKAGE=ANDROID_PACKAGE, ANDROID_CERT_SHA256=",".join(ANDROID_PRINTS) + ", not-a-print")
 for k in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SECRET_KEY"):
     os.environ.pop(k, None)
 

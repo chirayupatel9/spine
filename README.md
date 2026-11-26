@@ -17,7 +17,7 @@ It's one small FastAPI server plus a touch-friendly web app. You can install it 
 - **Spotify.**
   - Your saved albums sync onto the shelf.
   - You can add any album by pasting its link.
-  - You can play on any Spotify device (phone, PC, speaker or TV). On desktop browsers, the screen running Album Viewer can also be the speaker.
+  - You can play on any Spotify device (phone, PC, speaker or TV), or make the screen running Album Viewer the speaker.
 - **Demo shelf.** One click loads 34 well-known albums from the iTunes catalogue, with real covers and 30-second previews that play on the screen. No account is needed, so you can try it before connecting anything. Remove it again in **Settings → Demo shelf**.
 - **The display.**
   - The row sits in a gunmetal bezel on a dark wall, shaped like a 28″ stretched-bar screen. **Settings → Display → Shape** switches between that bar, a wider screen, or filling the window.
@@ -87,7 +87,7 @@ Steps:
 
 Notes:
 - If Spotify blocks the saved-albums endpoint for your app, Album Viewer falls back to building albums from your saved songs. You can also add albums by link.
-- Playing in the browser (Settings → "Use this screen as a Spotify speaker") works in **desktop** Chrome, Edge and Firefox. On an Android tablet, keep the Spotify app installed and pick it from the 🔈 speaker menu. Album Viewer then acts as the remote.
+- Playing in the browser (Settings → "Use this screen as a Spotify speaker") works in Chrome, Edge, Firefox and Safari, on Android and iOS as well as desktop, according to Spotify. It needs full Premium: Spotify's mobile-only plans are excluded. On iPhone and iPad, playback moved to the page from another device doesn't start until you tap. You can also open the Spotify app on the device, pick it from the 🔈 speaker menu, and use Album Viewer as the remote; that keeps playing if the device puts the browser to sleep.
 
 ## Hosting it
 - **At home (simplest).** Run it on a PC or server in your house. Open `http://<server-ip>:8000` from the tablet for local music. Spotify sign-in needs `PUBLIC_URL` to be https or 127.0.0.1, so use one of the options below for the Spotify part.
@@ -130,8 +130,24 @@ In `.env`, set `PUBLIC_URL=https://albums.yourdomain.com` and `FORWARDED_ALLOW_I
 Keep `data/` backed up: it holds the database (saved order, hidden albums, Spotify sign-in), cached covers and the generated password.
 
 ## Install as an app
-- **Android tablet.** Open the URL in Chrome, then **⋮ → Add to Home screen / Install app**. It opens fullscreen like a native app. For a wall tablet, use Android's *screen pinning* or a kiosk launcher such as Fully Kiosk Browser.
+- **Android tablet.** Open the URL in Chrome, then **⋮ → Add to Home screen / Install app**. It opens fullscreen like a native app. For a wall tablet, use Android's *screen pinning* or a kiosk launcher such as Fully Kiosk Browser. To install it from Google Play instead, see [Android app](#android-app).
 - **Windows.** Open the URL in Edge or Chrome, then **⋯ → Apps → Install this site as an app**. For a kiosk screen, run `msedge --kiosk https://albums.yourdomain.com --edge-kiosk-type=fullscreen`.
+
+## Android app
+You can wrap your Album Viewer in a small Android app (a *Trusted Web Activity*) and install it from Google Play, for example on Play's internal testing track for your own devices. The app opens your address full screen using Chrome's engine, so every change to the site reaches the app without a new release, and the Spotify browser player works.
+
+1. Generate the project with Google's [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap) (needs JDK 17 and the Android SDK), answering its questions with your own package name:
+   ```bash
+   npx @bubblewrap/cli init --manifest https://albums.yourdomain.com/manifest.webmanifest
+   ```
+   Set the minimum Android version to 24 (Android 7.0) if it asks: the browser-helper library it uses requires it. Its build signs with build-tools 36.1.0 (`sdkmanager "build-tools;36.1.0"`).
+2. Build and sign: `npx @bubblewrap/cli build --skipPwaValidation`. This makes `app-release-bundle.aab` for Play and `app-release-signed.apk` to install directly. **Back up the `.keystore` file and its password**: every update must be signed with it.
+3. Tell the server about the app, in `.env`:
+   ```bash
+   ANDROID_PACKAGE=com.example.albumviewer
+   ANDROID_CERT_SHA256=<Play app-signing key SHA-256>,<upload key SHA-256>
+   ```
+   Play Console shows the app-signing key under **Test and release → App integrity**. For your upload key, run `keytool -printcert -jarfile app-release-signed.apk`. The server then answers at `/.well-known/assetlinks.json` (no sign-in needed there). Until it does, the app opens with a browser address bar.
 
 ## Tests
 ```bash
