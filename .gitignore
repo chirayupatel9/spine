@@ -1,11 +1,13 @@
-.env
-data/
-music/
+# Top-level folders only (a leading slash): unanchored, "music/" also hid the Android app's
+# dev/chirayupatel/music/ source folder.
+/.env
+/data/
+/music/
+/.venv/
 __pycache__/
 *.pyc
-.venv/
 .pytest_cache/
 
 # Deployment files: tunnel secret and machine-specific Compose settings
-tunnel/
-docker-compose.override.yml
+/tunnel/
+/docker-compose.override.yml

@@ -134,30 +134,26 @@ Keep `data/` backed up: it holds the database (saved order, hidden albums, Spoti
 - **Windows.** Open the URL in Edge or Chrome, then **⋯ → Apps → Install this site as an app**. For a kiosk screen, run `msedge --kiosk https://albums.yourdomain.com --edge-kiosk-type=fullscreen`.
 
 ## Android app
-You can wrap your Album Viewer in a small Android app (a *Trusted Web Activity*) and install it from Google Play, for example on Play's internal testing track for your own devices. The app opens your address full screen using Chrome's engine, so every change to the site reaches the app without a new release, and the Spotify browser player works.
+`android/` is a native Android app (Kotlin and Jetpack Compose) that talks to your server:
+- **Phones:** the vertical stack of spines with momentum scrolling and an A–Z rail you slide along. Tap a spine to open it into its cover and play it.
+- **Tablets and landscape:** the wall shelf in its bezel.
+- **Playback:** local and demo albums play in a background service (Media3), with lock-screen and notification controls, artwork, a draggable position bar, and Bluetooth and headphone buttons. Spotify albums are started on your Spotify device through the server.
+- **Instant start:** it opens on the last shelf it saw, then refreshes.
+- **Sign-in:** your server's address and password, kept in the app's private storage (it uses the same sign-in cookie as the web app).
 
-1. Generate the project with Google's [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap) (needs JDK 17 and the Android SDK), answering its questions with your own package name:
-   ```bash
-   npx @bubblewrap/cli init --manifest https://albums.yourdomain.com/manifest.webmanifest
-   ```
-   Set the minimum Android version to 24 (Android 7.0) if it asks: the browser-helper library it uses requires it. Its build signs with build-tools 36.1.0 (`sdkmanager "build-tools;36.1.0"`).
-2. Build and sign: `npx @bubblewrap/cli build --skipPwaValidation`. This makes `app-release-bundle.aab` for Play and `app-release-signed.apk` to install directly. **Back up the `.keystore` file and its password**: every update must be signed with it.
+Build it with JDK 17 and the Android SDK (platform 36). Set `JAVA_HOME` and `ANDROID_HOME`, then in `android/`:
+```powershell
+.\gradlew.bat bundleRelease assembleRelease
+```
+Sign the results with your upload key. `zipalign` and `apksigner` are in the SDK's `build-tools` folder; each tool asks for the key's password:
+```powershell
+jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore upload.keystore -signedjar app-release-bundle.aab app\build\outputs\bundle\release\app-release.aab upload
+zipalign -f -p 4 app\build\outputs\apk\release\app-release-unsigned.apk app-release-unsigned-aligned.apk
+apksigner sign --ks upload.keystore --ks-key-alias upload --out app-release-signed.apk app-release-unsigned-aligned.apk
+```
+`app-release-bundle.aab` goes to Google Play; `app-release-signed.apk` installs directly. Create the key once with `keytool -genkeypair -keystore upload.keystore -alias upload -keyalg RSA -keysize 2048 -validity 10000`, and **back up the `.keystore` file and its password**: every update must be signed with it. Raise `versionCode` in `app/build.gradle.kts` for each release.
 
-   Two snags you may hit on Windows:
-   - *"The provided androidSdk isn't correct"*: Bubblewrap expects a `tools` or `bin` folder at the top of the SDK, which Android Studio's newer layout doesn't have. Create an empty `bin` folder there.
-   - *"'gradlew.bat' is not recognized"*: your shell won't run programs from the current folder (`NoDefaultCurrentDirectoryInExePath` is set). Run Bubblewrap from a normal PowerShell window, or build and sign by hand (`zipalign` and `apksigner` are in the SDK's `build-tools` folder; set `JAVA_HOME` and `ANDROID_HOME` first):
-     ```powershell
-     .\gradlew.bat bundleRelease assembleRelease
-     jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore upload.keystore -signedjar app-release-bundle.aab app\build\outputs\bundle\release\app-release.aab upload
-     zipalign -f -p 4 app\build\outputs\apk\release\app-release-unsigned.apk app-release-unsigned-aligned.apk
-     apksigner sign --ks upload.keystore --ks-key-alias upload --out app-release-signed.apk app-release-unsigned-aligned.apk
-     ```
-3. Tell the server about the app, in `.env`:
-   ```bash
-   ANDROID_PACKAGE=com.example.albumviewer
-   ANDROID_CERT_SHA256=<Play app-signing key SHA-256>,<upload key SHA-256>
-   ```
-   Play Console shows the app-signing key under **Test and release → App integrity**. For your upload key, run `keytool -printcert -jarfile app-release-signed.apk`. The server then answers at `/.well-known/assetlinks.json` (no sign-in needed there). Until it does, the app opens with a browser address bar.
+The app's address is set in `net/Api.kt` (`DEFAULT_SERVER`); you can change it on its sign-in screen. The server's `/.well-known/assetlinks.json` (`ANDROID_PACKAGE`, `ANDROID_CERT_SHA256` in `.env`) was for the earlier web-wrapper version of the app; the native app doesn't need it.
 
 ## Tests
 ```bash
