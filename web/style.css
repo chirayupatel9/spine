@@ -20,9 +20,7 @@
   --ease-open: cubic-bezier(.32, .72, 0, 1);
   --open-dur: 480ms;
   font-family: var(--sans);
-  transition: --glow 900ms var(--ease-in-out);   /* the wall's glow fades between album colours */
 }
-@property --glow { syntax: "<color>"; inherits: true; initial-value: transparent; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overscroll-behavior: none; }
 body { display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; overflow: hidden; }
@@ -65,14 +63,18 @@ body.wallmode.peek #topbar { transform: none; opacity: 1; }
 #room {
   flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 10px clamp(12px, 4vw, 64px) 40px;
-  background:
-    radial-gradient(ellipse 60% 55% at 50% 48%, color-mix(in srgb, var(--glow) 16%, transparent), transparent 70%),
-    radial-gradient(ellipse 80% 70% at 50% 30%, #2c2a27 0%, #171513 55%, var(--bg) 100%);
+  background: radial-gradient(ellipse 80% 70% at 50% 30%, #2c2a27 0%, #171513 55%, var(--bg) 100%);
 }
-#room::before { /* plaster grain */
-  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5; mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+#room::before { /* plaster grain: a small tile, plain alpha (blend modes are costly on phones) */
+  content: ""; position: absolute; inset: 0; pointer-events: none; background: url("/noise.png");
 }
+/* The wall glows faintly in the playing album's colour. Two layers cross-fade on opacity, which a
+   phone's compositor does for free, instead of repainting a screen-sized gradient every frame. */
+.glow {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 900ms var(--ease-in-out);
+  background: radial-gradient(ellipse 60% 55% at 50% 48%, color-mix(in srgb, var(--glow, transparent) 18%, transparent), transparent 70%);
+}
+.glow.on { opacity: 1; }
 
 /* ------------------------------------------------ the device: gunmetal bezel around matte glass */
 #device {
@@ -83,8 +85,7 @@ body.wallmode.peek #topbar { transform: none; opacity: 1; }
   box-shadow:
     0 0 0 1px rgba(205, 207, 212, .55),
     inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(0,0,0,.6),
-    0 50px 90px -20px rgba(0,0,0,.85), 0 18px 30px rgba(0,0,0,.55),
-    0 0 120px -20px color-mix(in srgb, var(--glow) 45%, transparent);
+    0 50px 90px -20px rgba(0,0,0,.85), 0 18px 30px rgba(0,0,0,.55);
 }
 #device .power { position: absolute; right: -7px; top: 50%; width: 5px; height: 12px; margin-top: -6px; border-radius: 0 3px 3px 0; background: linear-gradient(90deg, #6b6d72, #2a2b2e); }
 #screen {
@@ -92,7 +93,7 @@ body.wallmode.peek #topbar { transform: none; opacity: 1; }
   box-shadow: inset 0 0 0 1px #000, 0 0 0 1px rgba(0,0,0,.7);
 }
 .glass { /* matte etched glass: soft top sheen, diagonal glare, edge vignette */
-  position: absolute; inset: 0; pointer-events: none; z-index: 3;
+  position: absolute; inset: 0; pointer-events: none; z-index: 3; will-change: transform;   /* own layer: never repainted by scrolling */
   background:
     linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,0) 22%),
     linear-gradient(105deg, rgba(255,255,255,0) 38%, rgba(255,255,255,.045) 46%, rgba(255,255,255,0) 58%);
@@ -103,7 +104,6 @@ body.wallmode.peek #topbar { transform: none; opacity: 1; }
 #row {
   position: absolute; inset: 0; display: flex; align-items: stretch; overflow-x: auto; overflow-y: hidden;
   scrollbar-width: none; touch-action: pan-x; cursor: grab; outline: none;
-  filter: saturate(.92);
 }
 #row::-webkit-scrollbar { display: none; }
 #row > .spine:first-child { margin-left: auto; }  /* a short shelf sits in the middle; a full one scrolls */
@@ -114,6 +114,7 @@ body.wallmode.peek #topbar { transform: none; opacity: 1; }
 .spine {
   position: relative; flex: none; width: var(--w); height: 100%; overflow: hidden; padding: 0; border: 0; border-radius: 0;
   color: var(--t); cursor: pointer; text-align: left;
+  contain: layout paint style;   /* opening one spine never makes the browser re-check the others' insides */
   background:
     linear-gradient(90deg, rgba(255,255,255,.13), rgba(255,255,255,.02) 16%, rgba(0,0,0,0) 62%, rgba(0,0,0,.42)),
     linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.18)),
@@ -198,7 +199,7 @@ body.arranging #row { cursor: default; }
 /* ------------------------------------------------ player */
 #player {
   display: flex; align-items: center; gap: 18px; padding: 12px 28px; padding-bottom: max(12px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--line); background: rgba(12,10,8,.92); backdrop-filter: blur(12px); z-index: 6;
+  border-top: 1px solid var(--line); background: rgba(12,10,8,.97); z-index: 6;
   animation: player-in 280ms var(--ease-out);
 }
 @keyframes player-in { from { opacity: 0; translate: 0 10px; } }
@@ -221,7 +222,7 @@ body.wallmode:not(.peek) #player { transform: translateY(100%); }
 
 /* ------------------------------------------------ wall mode: just the screen, edge to edge */
 body.wallmode #room { padding: 0; background: #000; }
-body.wallmode #room::before, body.wallmode #index, body.wallmode #hint { display: none; }
+body.wallmode #room::before, body.wallmode .glow, body.wallmode #index, body.wallmode #hint { display: none; }
 body.wallmode #device { max-width: none; flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0; border-radius: 0; box-shadow: none; background: #000; }
 body.wallmode #device .power { display: none; }
 body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
@@ -230,7 +231,7 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
    app.js adds .in after un-hiding a sheet and removes it before hiding, so these are transitions:
    closing mid-open reverses from wherever the sheet is. Enter 200-260ms, exit 150ms. */
 .sheet { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; }
-.sheet-bg { position: absolute; inset: 0; background: rgba(5,4,3,.66); backdrop-filter: blur(8px); opacity: 0; transition: opacity 150ms var(--ease-out); }
+.sheet-bg { position: absolute; inset: 0; background: rgba(5,4,3,.8); opacity: 0; transition: opacity 150ms var(--ease-out); }
 .sheet.in .sheet-bg { opacity: 1; transition-duration: 220ms; }
 .album-card, .panel { opacity: 0; transform: scale(.96); transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out); }
 .sheet.in .album-card, .sheet.in .panel { opacity: 1; transform: none; transition-duration: 200ms, 260ms; }
@@ -305,6 +306,56 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
   #toast, #scanToast { translate: none; }
   button:active { transform: none; }
 }
+
+/* ------------------------------------------------ phones: the shelf turns 90 degrees
+   (app.js sets body.vertical at 600px and narrower). Spines stack top to bottom and fill the screen;
+   an open album is a square as wide as the screen; the A-Z index becomes a rail you slide along. */
+body.vertical #room { padding: 4px 36px 10px 10px; align-items: stretch; justify-content: stretch; }
+body.vertical #device { flex: 1; min-height: 0; max-width: none; display: flex; flex-direction: column; padding: 6px; border-radius: 16px; }
+body.vertical #device .power { display: none; }
+body.vertical #screen { flex: 1; min-height: 0; border-radius: 11px; }
+body.vertical .glass {
+  background: linear-gradient(90deg, rgba(255,255,255,.06), rgba(255,255,255,0) 26%);
+  box-shadow: inset 0 0 36px rgba(0,0,0,.55);
+}
+body.vertical #row { flex-direction: column; overflow-x: hidden; overflow-y: auto; touch-action: pan-y; cursor: default; overscroll-behavior: contain; }
+body.vertical #row > .spine:first-child { margin-left: 0; margin-top: auto; }
+body.vertical #row > .spine:last-child { margin-right: 0; margin-bottom: auto; }
+body.vertical .spine {
+  width: 100%; height: var(--w);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.13), rgba(255,255,255,.02) 16%, rgba(0,0,0,0) 62%, rgba(0,0,0,.42)),
+    linear-gradient(90deg, rgba(255,255,255,.05), rgba(0,0,0,.18)),
+    var(--c);
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.07);
+  transition: height var(--open-dur) var(--ease-open), transform 180ms var(--ease-out), filter 150ms var(--ease-out);
+}
+body.vertical .spine.open { width: 100%; height: var(--screen-h); }
+body.vertical .spine .lbl { inset: 0 calc(var(--screen-h) * .13) 0 calc(var(--screen-h) * .06); writing-mode: horizontal-tb; }
+body.vertical .spine .mark { /* a thin rule, not a box: a box at the end of a row reads as a checkbox */
+  left: auto; right: calc(var(--screen-h) * .045); top: 28%; bottom: 28%; height: auto; width: 2px;
+  border: 0; border-radius: 1px; background: currentColor; opacity: .3;
+}
+body.vertical .spine.band::before { right: auto; bottom: 0; height: auto; width: calc(var(--screen-h) * .04); }
+body.vertical .spine.picked { transform: translateX(-3%); }
+body.vertical #hint { display: none; }
+body.vertical #index {
+  position: absolute; z-index: 6; right: 2px; top: 50%; transform: translateY(-50%);
+  margin: 0; min-height: 0; max-width: none; padding: 6px 0;
+  flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 0; touch-action: none;
+}
+body.vertical #index button { min-width: 30px; min-height: 0; height: var(--ih, 22px); padding: 0; font-size: 10px; letter-spacing: 0; border-radius: 6px; }
+body.vertical #index.scrubbing button.on { color: #fff; }
+#scrubBubble {
+  position: absolute; z-index: 7; right: 44px; width: 60px; height: 60px; margin-top: -30px; border-radius: 50%;
+  display: grid; place-items: center; pointer-events: none;
+  background: var(--accent); color: #fff; font: 400 28px/1 var(--serif); box-shadow: 0 12px 30px rgba(0,0,0,.5);
+  opacity: 0; transform: scale(.85); transition: opacity 120ms var(--ease-out), transform 180ms var(--ease-out);
+}
+#scrubBubble.on { opacity: 1; transform: none; }
+body.vertical.wallmode #room { padding: 0; }
+body.vertical.wallmode #device { padding: 0; border-radius: 0; }
+body.vertical.wallmode #screen { border-radius: 0; }
 
 /* ------------------------------------------------ touch screens (phones and tablets, any width):
    every control at least 44px, the size a fingertip can hit reliably */

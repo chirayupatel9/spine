@@ -99,18 +99,36 @@ function reveal(el, show, exitMs = 160) {
   }
 }
 
+/* The shelf runs left to right, or top to bottom on phones (S.vertical). These read and write
+   positions along whichever way it runs, so the rest of the code doesn't care. */
+const ROW = document.getElementById("row");
+const ax = {
+  pos: () => (S.vertical ? ROW.scrollTop : ROW.scrollLeft),
+  set: v => { if (S.vertical) ROW.scrollTop = v; else ROW.scrollLeft = v; },
+  view: () => (S.vertical ? ROW.clientHeight : ROW.clientWidth),
+  total: () => (S.vertical ? ROW.scrollHeight : ROW.scrollWidth),
+  start: el => (S.vertical ? el.offsetTop : el.offsetLeft),
+  rStart: r => (S.vertical ? r.top : r.left),
+  rSize: r => (S.vertical ? r.height : r.width),
+  rEnd: r => (S.vertical ? r.bottom : r.right),
+  client: e => (S.vertical ? e.clientY : e.clientX),
+  shift: d => (S.vertical ? `0 ${d}px` : `${d}px 0`),
+};
+// A short tick under the finger. Browsers allow it only after the person has touched the page.
+const haptic = (ms = 8) => { try { if (navigator.userActivation?.hasBeenActive !== false) navigator.vibrate?.(ms); } catch {} };
+
 /* FLIP: run `mutate` (which moves elements in the layout), then slide each of `els` from where it
    was to where it now is. Uses `translate`, so a `transform` set by CSS (the lifted spine) is kept. */
 function flip(els, mutate, ms = 200) {
   if (reduceMotion.matches) return mutate();
-  const before = els.map(el => el.getBoundingClientRect().left);
+  const before = els.map(el => ax.rStart(el.getBoundingClientRect()));
   mutate();
   for (const el of els) for (const an of el.getAnimations()) if (an.id === "flip") an.cancel();
-  const after = els.map(el => el.getBoundingClientRect().left);
+  const after = els.map(el => ax.rStart(el.getBoundingClientRect()));
   const easing = cssVal("--ease-out");
   els.forEach((el, i) => {
-    const dx = before[i] - after[i];
-    if (Math.abs(dx) > 0.5) el.animate([{ translate: `${dx}px 0` }, { translate: "0 0" }], { duration: ms, easing, id: "flip" });
+    const d = before[i] - after[i];
+    if (Math.abs(d) > 0.5) el.animate([{ translate: ax.shift(d) }, { translate: "0 0" }], { duration: ms, easing, id: "flip" });
   });
 }
 
@@ -158,6 +176,15 @@ function layout() {
   const screen = $("#screen"), device = $("#device"), room = $("#room");
   const shape = store.get("shape", "bar");
   const aspect = shape === "wide" ? 3.2 : 5.33;
+  // Phones: the shelf turns 90 degrees and fills the screen; an open album is a square as wide as it.
+  S.vertical = matchMedia("(max-width: 600px)").matches;
+  document.body.classList.toggle("vertical", S.vertical);
+  if (S.vertical) {
+    screen.style.height = "";
+    S.H = Math.round(screen.clientWidth) || 300;
+    document.documentElement.style.setProperty("--screen-h", S.H + "px");
+    return;
+  }
   if (document.body.classList.contains("wallmode")) {
     // Edge to edge. A stretched-bar display fills naturally; on a tablet the bar is letterboxed
     // unless the shape is "fill".
@@ -187,7 +214,8 @@ function makeSpine(a) {
   const el = document.createElement("button");
   el.className = "spine" + (h % 3 === 0 ? " band" : "") + (h % 5 === 1 ? " serif" : "") +
     (a.hidden ? " hiddenalb" : "") + (w < 13 ? " tiny" : "");
-  el.style.cssText = `--w:${w}px;--c:${a.color};--t:${a.text_color};--fs:${clamp(w * 0.37, 7, 13).toFixed(1)}px`;
+  const fs = S.vertical ? clamp(w * 0.42, 9, 15) : clamp(w * 0.37, 7, 13);   // text runs along the spine
+  el.style.cssText = `--w:${w}px;--c:${a.color};--t:${a.text_color};--fs:${fs.toFixed(1)}px`;
   el.dataset.id = a.id;
   el.dataset.w = w;
   el.setAttribute("role", "listitem");
@@ -211,7 +239,7 @@ function render() {
   document.body.classList.toggle("notext", !store.get("spineNames", true));
   const row = $("#row");
   const list = visibleAlbums();
-  const prevScroll = row.scrollLeft;
+  const prevScroll = ax.pos();
   S.list = list;
   S.els.clear();
   row.classList.add("instant");
@@ -230,7 +258,7 @@ function render() {
   $("#empty").hidden = S.albums.length > 0 || !S.loaded;
   renderIndex();
   if (S.openId && S.els.has(S.openId)) centerOn(S.openId, false);
-  else row.scrollLeft = prevScroll;
+  else ax.set(prevScroll);
   requestAnimationFrame(() => requestAnimationFrame(() => row.classList.remove("instant")));
   updatePill();
   updateHint();
@@ -247,23 +275,31 @@ function renderIndex() {
   S.keyAt = new Map(S.list.map(a => [a.id, indexKey(a)]));
   for (const [k, id] of firsts) {
     const b = document.createElement("button");
-    b.textContent = k; b.dataset.key = k;
-    b.onclick = () => {
-      const el = S.els.get(id), row = $("#row");
-      if (el) scrollRowTo(clamp(el.offsetLeft - 1, 0, row.scrollWidth - row.clientWidth), true);
-    };
+    // The phone rail is narrow: decades read '70s there.
+    b.textContent = S.vertical && /^\d{4}s$/.test(k) ? "’" + k.slice(2) : k;
+    b.dataset.key = k; b.dataset.id = id;
+    b.onclick = () => jumpTo(id, true);
     nav.appendChild(b);
   }
+  if (S.vertical) {   // fit the rail to the room: one row per letter, never taller than it can be
+    const room = $("#room");
+    nav.style.setProperty("--ih", Math.max(12, Math.min(24, Math.floor((room.clientHeight - 32) / firsts.size))) + "px");
+  }
   markIndex();
+}
+
+function jumpTo(id, animate) {
+  const el = S.els.get(id);
+  if (el) scrollRowTo(clamp(ax.start(el) - 1, 0, ax.total() - ax.view()), animate);
 }
 
 let idxRaf = 0;
 function markIndex() {
   idxRaf = 0;
   if (!S.keyAt) return;
-  const row = $("#row"), kids = row.children, mid = row.scrollLeft + row.clientWidth / 2;
+  const kids = ROW.children, mid = ax.pos() + ax.view() / 2;
   let lo = 0, hi = kids.length - 1;
-  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (kids[m].offsetLeft <= mid) lo = m; else hi = m - 1; }
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (ax.start(kids[m]) <= mid) lo = m; else hi = m - 1; }
   const key = kids[lo] && S.keyAt.get(kids[lo].dataset.id);
   $$("#index button").forEach(b => b.classList.toggle("on", b.dataset.key === key));
 }
@@ -311,7 +347,7 @@ function centerOn(id, animate) {
     x += w;
   }
   if (target === null) return;
-  const left = clamp(target - row.clientWidth / 2, 0, Math.max(0, x - row.clientWidth));
+  const left = clamp(target - ax.view() / 2, 0, Math.max(0, x - ax.view()));
   // Same duration and curve as the CSS width transition: every spine's width moves by the same
   // fraction each frame, so the album travels smoothly to the middle instead of drifting past it.
   scrollRowTo(left, animate, { dur: cssMs("--open-dur"), ease: cssEase("--ease-open") });
@@ -320,10 +356,9 @@ function centerOn(id, animate) {
 let scrollAnim = 0, scrollTarget = null;
 function stopScrollAnim() { cancelAnimationFrame(scrollAnim); scrollAnim = 0; scrollTarget = null; }
 function scrollRowTo(left, animate, { dur, ease } = {}) {
-  const row = $("#row");
   stopScrollAnim();
-  const from = row.scrollLeft, dist = Math.abs(left - from);
-  if (!animate || reduceMotion.matches || dur === 0) { row.scrollLeft = left; return; }
+  const from = ax.pos(), dist = Math.abs(left - from);
+  if (!animate || reduceMotion.matches || dur === 0) { ax.set(left); return; }
   if (dist < 1) return;
   dur ??= clamp(220 + Math.sqrt(dist) * 9, 240, 640);   // longer trips take a little longer, never sluggish
   ease ??= cssEase("--ease-out");
@@ -332,7 +367,7 @@ function scrollRowTo(left, animate, { dur, ease } = {}) {
   const step = now => {
     t0 ??= now;   // start on the same frame as the CSS transitions
     const t = Math.min(1, (now - t0) / dur);
-    row.scrollLeft = from + (left - from) * ease(t);
+    ax.set(from + (left - from) * ease(t));
     if (t < 1) scrollAnim = requestAnimationFrame(step);
     else { scrollAnim = 0; scrollTarget = null; }
   };
@@ -351,16 +386,38 @@ function updatePill() {
   pill.querySelector(".eq").hidden = !isPlayingAlbum;
 }
 
+/* Cross-fade two glow layers: the new colour is painted once on the hidden layer, then only
+   opacity animates, which the compositor handles without repainting. */
 function setGlow() {
   const a = S.byId.get(Player.albumId() || S.openId);
-  document.documentElement.style.setProperty("--glow", a && store.get("glow", true) ? a.color : "transparent");
+  const color = a && store.get("glow", true) ? a.color : "";
+  const layers = $$(".glow");
+  const cur = layers.find(l => l.classList.contains("on"));
+  if ((cur?.dataset.c || "") === color) return;
+  cur?.classList.remove("on");
+  if (!color) return;
+  const next = layers.find(l => l !== cur) || layers[0];
+  next.style.setProperty("--glow", color);
+  next.dataset.c = color;
+  next.classList.add("on");
 }
 
 /* ---------------- loading */
 
-async function loadAlbums() {
-  const list = await api(`/api/albums?include_hidden=${store.get("showHidden", false)}`);
-  if (S.loaded) S.fresh = new Set(list.filter(a => !S.byId.has(a.id)).map(a => a.id));
+/* The last shelf this device saw, kept so the app opens on it instantly (and works offline);
+   the server's fresh copy replaces it moments later. Cleared on sign-out. */
+const DATA_CACHE = "albumviewer-data";
+const dataCache = {
+  async get(url) { try { const r = await (await caches.open(DATA_CACHE)).match(url); return r ? await r.json() : null; } catch { return null; } },
+  async put(url, json) { try { await (await caches.open(DATA_CACHE)).put(url, new Response(json, { headers: { "Content-Type": "application/json" } })); } catch {} },
+  clear() {
+    if (typeof caches === "undefined") return Promise.resolve();
+    return Promise.all([DATA_CACHE, "albumviewer-art"].map(n => caches.delete(n).catch(() => {})));
+  },
+};
+
+function applyAlbums(list, animateNew) {
+  if (animateNew) S.fresh = new Set(list.filter(a => !S.byId.has(a.id)).map(a => a.id));
   S.albums = list;
   S.byId = new Map(list.map(a => [a.id, a]));
   S.loaded = true;
@@ -368,6 +425,20 @@ async function loadAlbums() {
   $('#sourceSeg [data-source="demo"]').hidden = !hasDemo;
   if (S.source === "demo" && !hasDemo) setSource("all");
   render();
+}
+
+async function loadAlbums() {
+  const url = `/api/albums?include_hidden=${store.get("showHidden", false)}`;
+  if (!S.loaded) {
+    const cached = await dataCache.get(url);
+    if (cached?.length) { S.json = JSON.stringify(cached); applyAlbums(cached, false); }
+  }
+  const list = await api(url);
+  const json = JSON.stringify(list);
+  dataCache.put(url, json);
+  if (S.loaded && json === S.json) return;   // unchanged: don't redraw (no flicker, no lost scroll)
+  S.json = json;
+  applyAlbums(list, S.loaded);
 }
 
 async function detail(id, fresh = false) {
@@ -391,6 +462,7 @@ row.addEventListener("click", e => {
 });
 
 async function tapToPlay(id) {
+  haptic(10);
   setOpen(id);
   try { await Player.playAlbum(await detail(id), 0); }
   catch (err) { toast(err.message); }
@@ -404,7 +476,7 @@ function glide(v) {
   let last = performance.now();
   const step = now => {
     const dt = now - last; last = now;
-    row.scrollLeft += v * dt;
+    ax.set(ax.pos() + v * dt);
     v *= Math.pow(0.94, dt / 16);
     if (Math.abs(v) > 0.02) glideRaf = requestAnimationFrame(step);
   };
@@ -415,18 +487,19 @@ row.addEventListener("pointerdown", e => {
   stopScrollAnim(); cancelAnimationFrame(glideRaf);
   Arrange.down(e);
   if (e.pointerType !== "mouse" || e.button !== 0) return;
-  Object.assign(Drag, { active: true, moved: false, startX: e.clientX, startScroll: row.scrollLeft, lastX: e.clientX, lastT: e.timeStamp, v: 0 });
+  const c = ax.client(e);
+  Object.assign(Drag, { active: true, moved: false, startX: c, startScroll: ax.pos(), lastX: c, lastT: e.timeStamp, v: 0 });
 });
 addEventListener("pointermove", e => {
   if (Arrange.move(e)) return;
   if (!Drag.active) return;
-  const dx = e.clientX - Drag.startX;
+  const c = ax.client(e), dx = c - Drag.startX;
   if (!Drag.moved && Math.abs(dx) > 5) { Drag.moved = true; row.classList.add("dragging"); }
   if (!Drag.moved) return;
-  row.scrollLeft = Drag.startScroll - dx;
+  ax.set(Drag.startScroll - dx);
   const dt = e.timeStamp - Drag.lastT;
-  if (dt > 0) Drag.v = 0.7 * ((Drag.lastX - e.clientX) / dt) + 0.3 * Drag.v;
-  Drag.lastX = e.clientX; Drag.lastT = e.timeStamp;
+  if (dt > 0) Drag.v = 0.7 * ((Drag.lastX - c) / dt) + 0.3 * Drag.v;
+  Drag.lastX = c; Drag.lastT = e.timeStamp;
 });
 addEventListener("pointerup", e => {
   if (Arrange.up(e)) return;
@@ -442,7 +515,7 @@ addEventListener("pointerup", e => {
 addEventListener("pointercancel", e => { Arrange.cancel(e); Drag.active = false; row.classList.remove("dragging"); });
 
 row.addEventListener("wheel", e => {
-  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+  if (S.vertical || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;   // a vertical stack scrolls natively
   e.preventDefault();
   stopScrollAnim(); cancelAnimationFrame(glideRaf);
   row.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 32 : 1);
@@ -451,24 +524,56 @@ row.addEventListener("wheel", e => {
 row.addEventListener("scroll", () => { if (!idxRaf) idxRaf = requestAnimationFrame(markIndex); }, { passive: true });
 row.addEventListener("contextmenu", e => { if (S.sort === "manual") e.preventDefault(); });
 row.addEventListener("keydown", e => {
-  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+  const fwd = S.vertical ? "ArrowDown" : "ArrowRight", back = S.vertical ? "ArrowUp" : "ArrowLeft";
+  if (e.key === fwd || e.key === back) {
     e.preventDefault();
     // Held or repeated keys add up from where the last press was heading, and stay quick.
-    const base = scrollTarget ?? row.scrollLeft;
-    const to = clamp(base + (e.key === "ArrowRight" ? 1 : -1) * row.clientWidth * 0.4, 0, row.scrollWidth - row.clientWidth);
+    const base = scrollTarget ?? ax.pos();
+    const to = clamp(base + (e.key === fwd ? 1 : -1) * ax.view() * 0.4, 0, ax.total() - ax.view());
     scrollRowTo(to, true, { dur: 220 });
   }
 });
 
+/* Phones: the A-Z rail on the right. Touch it and slide: the stack jumps letter by letter under
+   your thumb, with a tick for each letter and a large one showing where you are. */
+const Scrub = { on: false, key: null };
+const rail = $("#index"), bubble = $("#scrubBubble");
+function scrubAt(e) {
+  const b = [...rail.children].find(x => { const r = x.getBoundingClientRect(); return e.clientY >= r.top && e.clientY < r.bottom; });
+  if (!b || b.dataset.key === Scrub.key) return;
+  Scrub.key = b.dataset.key;
+  jumpTo(b.dataset.id, false);
+  markIndex();
+  haptic(4);
+  const room = $("#room").getBoundingClientRect(), r = b.getBoundingClientRect();
+  bubble.textContent = b.textContent;
+  bubble.style.top = (r.top + r.height / 2 - room.top) + "px";
+  bubble.classList.add("on");
+}
+function endScrub() { Scrub.on = false; Scrub.key = null; rail.classList.remove("scrubbing"); bubble.classList.remove("on"); }
+rail.addEventListener("pointerdown", e => {
+  if (!S.vertical || !e.target.closest("button")) return;
+  e.preventDefault();
+  stopScrollAnim();
+  Scrub.on = true;
+  try { rail.setPointerCapture(e.pointerId); } catch {}
+  rail.classList.add("scrubbing");
+  scrubAt(e);
+});
+rail.addEventListener("pointermove", e => { if (Scrub.on) scrubAt(e); });
+rail.addEventListener("pointerup", endScrub);
+rail.addEventListener("pointercancel", endScrub);
+rail.addEventListener("click", e => { if (S.vertical && e.detail > 0) e.stopPropagation(); }, true);   // the press already jumped (keyboard clicks still work)
+
 /* manual order: hold a spine, then drag it along the row */
 const Arrange = {
-  timer: 0, el: null, picked: false, startX: 0, x: 0, edgeRaf: 0,
+  timer: 0, el: null, picked: false, sx: 0, sy: 0, x: 0, edgeRaf: 0,
   down(e) {
     clearTimeout(this.timer);
     if (S.sort !== "manual") return;
     const el = e.target.closest(".spine");
     if (!el) return;
-    this.el = el; this.startX = this.x = e.clientX;
+    this.el = el; this.sx = e.clientX; this.sy = e.clientY; this.x = ax.client(e);
     this.timer = setTimeout(() => this.pick(e.pointerId), e.pointerType === "mouse" ? 260 : 380);
   },
   pick(pointerId) {
@@ -478,20 +583,20 @@ const Arrange = {
     this.el.classList.add("picked");
     document.body.classList.add("arranging");
     try { row.setPointerCapture(pointerId); } catch {}
-    navigator.vibrate?.(12);
+    haptic(12);
     this.edge();
   },
   move(e) {
-    if (this.timer && Math.abs(e.clientX - this.startX) > 6) { clearTimeout(this.timer); this.timer = 0; }
+    if (this.timer && Math.hypot(e.clientX - this.sx, e.clientY - this.sy) > 6) { clearTimeout(this.timer); this.timer = 0; }
     if (!this.picked) return false;
-    this.x = e.clientX;
+    this.x = ax.client(e);
     this.place();
     return true;
   },
   place() {
     const all = [...row.children], kids = all.filter(k => k !== this.el);
     let before = null;
-    for (const k of kids) { const r = k.getBoundingClientRect(); if (this.x < r.left + r.width / 2) { before = k; break; } }
+    for (const k of kids) { const r = k.getBoundingClientRect(); if (this.x < ax.rStart(r) + ax.rSize(r) / 2) { before = k; break; } }
     if (before ? this.el.nextElementSibling === before : row.lastElementChild === this.el) return;
     // Only the spines between the old and new slot move: slide them aside rather than jump.
     const i = all.indexOf(this.el), j = before ? all.indexOf(before) : all.length;
@@ -500,9 +605,9 @@ const Arrange = {
   },
   edge() { // scroll while the picked spine is held near either end
     if (!this.picked) return;
-    const r = row.getBoundingClientRect(), zone = Math.min(80, r.width * 0.12);
-    const v = this.x < r.left + zone ? -1 : this.x > r.right - zone ? 1 : 0;
-    if (v) { row.scrollLeft += v * 9; this.place(); }
+    const r = row.getBoundingClientRect(), zone = Math.min(80, ax.rSize(r) * 0.12);
+    const v = this.x < ax.rStart(r) + zone ? -1 : this.x > ax.rEnd(r) - zone ? 1 : 0;
+    if (v) { ax.set(ax.pos() + v * 9); this.place(); }
     this.edgeRaf = requestAnimationFrame(() => this.edge());
   },
   up() {
@@ -813,8 +918,19 @@ audio.addEventListener("ended", () => {
   if (Player.index < Player.queue.length - 1) Player.next();
   else { Player.ui({ playing: false }); updatePill(); renderSheetState(); }
 });
-audio.addEventListener("play", () => { if (Player.mode === "browser") { Player.ui({ playing: true }); updatePill(); } });
-audio.addEventListener("pause", () => { if (Player.mode === "browser") { Player.ui({ playing: false }); updatePill(); } });
+/* Lock screen and notification: the playing state and a position bar you can drag there. */
+function mediaState() {
+  const ms = navigator.mediaSession;
+  if (!ms || Player.mode !== "browser") return;
+  ms.playbackState = audio.paused ? "paused" : "playing";
+  if (ms.setPositionState && isFinite(audio.duration) && audio.duration > 0) {
+    try { ms.setPositionState({ duration: audio.duration, playbackRate: audio.playbackRate || 1, position: Math.min(audio.currentTime, audio.duration) }); } catch {}
+  }
+}
+audio.addEventListener("play", () => { if (Player.mode === "browser") { Player.ui({ playing: true }); updatePill(); mediaState(); } });
+audio.addEventListener("pause", () => { if (Player.mode === "browser") { Player.ui({ playing: false }); updatePill(); mediaState(); } });
+audio.addEventListener("loadedmetadata", mediaState);
+audio.addEventListener("seeked", mediaState);
 audio.addEventListener("timeupdate", () => Player.mode === "browser" && audio.duration && Player.ui({ pos: audio.currentTime, dur: audio.duration }));
 audio.addEventListener("error", () => { if (Player.mode === "browser" && audio.src) { toast("Couldn't play this track in the browser, skipping"); setTimeout(() => Player.next(), 800); } });
 $(".p-progress").addEventListener("click", e => {
@@ -828,10 +944,16 @@ $("#pPrev").onclick = () => Player.prev();
 $("#pCover").onclick = () => { const id = Player.albumId(); if (id && S.byId.has(id)) { setOpen(id); openSheet(id, $("#pCover")); } };
 $("#pDevice").onclick = () => S.status?.spotify?.connected ? openDevices() : toast("Local music and demo previews play on this screen. Connect Spotify in Settings to pick other speakers.");
 if ("mediaSession" in navigator) {
-  navigator.mediaSession.setActionHandler("play", () => Player.toggle());
-  navigator.mediaSession.setActionHandler("pause", () => Player.toggle());
-  navigator.mediaSession.setActionHandler("nexttrack", () => Player.next());
-  navigator.mediaSession.setActionHandler("previoustrack", () => Player.prev());
+  const ms = navigator.mediaSession;
+  const on = (action, fn) => { try { ms.setActionHandler(action, fn); } catch {} };   // older browsers lack some actions
+  const seekBy = s => { if (Player.mode === "browser" && audio.duration) { audio.currentTime = clamp(audio.currentTime + s, 0, audio.duration); mediaState(); } };
+  on("play", () => Player.toggle());
+  on("pause", () => Player.toggle());
+  on("nexttrack", () => Player.next());
+  on("previoustrack", () => Player.prev());
+  on("seekto", d => { if (Player.mode === "browser" && audio.duration) { audio.currentTime = clamp(d.seekTime, 0, audio.duration); mediaState(); } });
+  on("seekbackward", d => seekBy(-(d.seekOffset || 10)));
+  on("seekforward", d => seekBy(d.seekOffset || 10));
 }
 
 /* ======================================================== Spotify Web Playback SDK (optional) */
@@ -983,6 +1105,8 @@ async function loadDemo() {
 $("#demoLoadBtn").onclick = loadDemo;
 
 $("#settingsBtn").onclick = openSettings;
+// Signing out also forgets this device's saved shelf and covers.
+$('form[action="/logout"]')?.addEventListener("submit", async e => { e.preventDefault(); await dataCache.clear(); e.target.submit(); });
 $("#rescanBtn").onclick = () => api("/api/library/rescan", { method: "POST" }).then(watchStatus);
 $("#refetchBtn").onclick = () => { if (confirm("Look up artwork again for every local album? Albums with embedded or folder art keep it.")) api("/api/library/rescan?force_art=true", { method: "POST" }).then(watchStatus); };
 $("#spAddBtn").onclick = async () => {
