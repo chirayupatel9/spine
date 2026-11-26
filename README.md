@@ -153,10 +153,23 @@ Keep `data/` backed up: it holds the database (saved order, hidden albums, Spoti
 `android/` is a native Android app (Kotlin and Jetpack Compose) that talks to your server:
 - **Phones:** the vertical stack of spines with momentum scrolling and an A–Z rail you slide along (in orders without letters, a handle you drag). The spine under your finger lifts. Tap a spine to open it into its cover and play it; its record slides out of the sleeve and turns while it plays. Hold one, then drag it to rearrange the shelf. The order is saved on the server, so every screen shares it; holding an album while another arrangement is showing switches to your own order, starting from what's on screen.
 - **Tablets and landscape:** the wall shelf in its bezel.
-- **Now playing:** tap the player bar, or swipe it up, for the full-screen player: the cover and its spinning record, a seek bar, shuffle, repeat (the album or one track) and Up next. Swipe down or press Back to put it away.
-- **Playback:** local and demo albums play in a background service (Media3), with lock-screen and notification controls, artwork, a draggable position bar, and Bluetooth and headphone buttons. Spotify albums are played on your Spotify device through the server, and the app follows what Spotify is playing while it's on screen.
+- **Now playing:** tap the player bar, or swipe it up, for the full-screen player: the cover with its record rising out of the sleeve and turning while it plays, a seek bar, shuffle, repeat (the album or one track), where it's playing, and Up next. Swipe down or press Back to put it away.
+- **Playback:** your own music and the demo shelf play in a background service (Media3), with lock-screen and notification controls, artwork, a draggable position bar, and Bluetooth and headphone buttons. Spotify plays in the phone's Spotify app; if Spotify isn't open, the app opens it and starts the album when you come back. The speaker button in the player moves Spotify to any of your Spotify speakers, or, for your own music, opens Android's list of outputs.
 - **Instant start:** it opens on the last shelf it saw, then refreshes.
-- **Sign-in:** your server's address and password, kept in the app's private storage (it uses the same sign-in cookie as the web app).
+- **Sign-in:** Google or Spotify in a browser tab, or the server's password where Google sign-in isn't set up. The session is kept in the app's private storage.
+
+### Releasing to Google Play automatically
+Every change to `android/` that reaches `main` is built, signed with your upload key and released to the **internal testing** track by `.github/workflows/android.yml`; testers' phones then update from Play on their own. The version code is the number of commits, so it goes up by itself. Until the setup below is done, the workflow only checks that the app builds.
+
+One-time setup (about 10 minutes):
+1. In https://console.cloud.google.com (the project you use for Google sign-in will do), enable the **Google Play Android Developer API**.
+2. Under **IAM & Admin → Service accounts**, create a service account (for example *play-publisher*; it needs no roles), then **Keys → Add key → Create new key → JSON**. A `.json` file downloads.
+3. In Play Console, open **Users and permissions → Invite new users**. Enter the service account's email, and under **App permissions** add Album Viewer with **View app information** and **Release apps to testing tracks**.
+4. In `android/`, run `.\release-secrets.ps1 -ServiceAccountKey <the .json file>`. It signs you in to GitHub if needed, checks the upload key's password, and stores three secrets in the repository: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `PLAY_SERVICE_ACCOUNT_JSON`. Then it offers to delete the downloaded file.
+
+To release without a new change, use **Actions → android → Run workflow** on GitHub. The upload key then also lives in GitHub's encrypted secrets. If it ever leaks, Play Console can reset the upload key; the key Play signs the app with stays with Google.
+
+### Building and signing by hand
 
 Build it with JDK 17 and the Android SDK (platform 36). Set `JAVA_HOME` and `ANDROID_HOME`, then in `android/`:
 ```powershell
@@ -168,7 +181,7 @@ jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore upload.keystore -si
 zipalign -f -p 4 app\build\outputs\apk\release\app-release-unsigned.apk app-release-unsigned-aligned.apk
 apksigner sign --ks upload.keystore --ks-key-alias upload --out app-release-signed.apk app-release-unsigned-aligned.apk
 ```
-`app-release-bundle.aab` goes to Google Play; `app-release-signed.apk` installs directly. Create the key once with `keytool -genkeypair -keystore upload.keystore -alias upload -keyalg RSA -keysize 2048 -validity 10000`, and **back up the `.keystore` file and its password**: every update must be signed with it. Raise `versionCode` in `app/build.gradle.kts` for each release.
+`app-release-bundle.aab` goes to Google Play; `app-release-signed.apk` installs directly. Create the key once with `keytool -genkeypair -keystore upload.keystore -alias upload -keyalg RSA -keysize 2048 -validity 10000`, and **back up the `.keystore` file and its password**: every update must be signed with it. The version code is the number of commits (`git rev-list --count HEAD`), so a build after a new commit is always newer.
 
 The app's address is set in `net/Api.kt` (`DEFAULT_SERVER`); you can change it on its sign-in screen. The server's `/.well-known/assetlinks.json` (`ANDROID_PACKAGE`, `ANDROID_CERT_SHA256` in `.env`) was for the earlier web-wrapper version of the app; the native app doesn't need it.
 

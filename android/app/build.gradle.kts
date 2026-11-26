@@ -5,6 +5,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+/* The version code is the number of commits, so each release is higher than the last without
+   anyone raising it by hand (main only moves forward). The release workflow passes it in as
+   VERSION_CODE; elsewhere it's counted here. */
+val versionNumber: Int = System.getenv("VERSION_CODE")?.toIntOrNull()
+    ?: runCatching { providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }.standardOutput.asText.get().trim().toInt() }
+        .getOrDefault(1)
+
 android {
     namespace = "dev.chirayupatel.music"
     compileSdk = 36
@@ -13,15 +20,27 @@ android {
         applicationId = "dev.chirayupatel.music"   // same as the Play listing: installs as an update
         minSdk = 24
         targetSdk = 36
-        versionCode = 7
-        versionName = "2.4.0"
+        versionCode = versionNumber
+        versionName = "2.4.$versionNumber"   // raise the first two numbers for bigger changes
+    }
+
+    signingConfigs {
+        // The release workflow (.github/workflows/android.yml) signs with the upload key from the
+        // repository's secrets. Anywhere else the build stays unsigned, and you sign it yourself at
+        // jarsigner's and apksigner's prompts (README, "Android app").
+        val keystore = System.getenv("ANDROID_KEYSTORE")
+        if (!keystore.isNullOrEmpty()) create("upload") {
+            storeFile = file(keystore)
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "upload"
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed after the build with jarsigner / apksigner, so the key's password is only ever
-            // typed at their prompts (see README, "Android app").
+            signingConfig = signingConfigs.findByName("upload")
         }
     }
     compileOptions {

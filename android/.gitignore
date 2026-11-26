@@ -10,3 +10,6 @@ local.properties
 *.apk
 *.aab
 *.idsig
+
+# Service account keys for releasing to Play (release-secrets.ps1 puts them in GitHub's secrets)
+*.json
