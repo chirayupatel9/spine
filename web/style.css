@@ -114,7 +114,7 @@ body.wallmode.peek #topbar { transform: none; opacity: 1; }
 #row.dragging .spine { pointer-events: none; }
 
 .spine {
-  position: relative; flex: none; width: var(--w); height: 100%; overflow: hidden; padding: 0; border: 0; border-radius: 0;
+  position: relative; flex: none; width: var(--w); overflow: hidden; padding: 0; border: 0; border-radius: 0;   /* height: the row's, by stretching */
   color: var(--t); cursor: pointer; text-align: left;
   contain: layout paint style;   /* opening one spine never makes the browser re-check the others' insides */
   background:
@@ -122,7 +122,8 @@ body.wallmode.peek #topbar { transform: none; opacity: 1; }
     linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.18)),
     var(--c);
   box-shadow: inset -1px 0 0 rgba(0,0,0,.65), inset 1px 0 0 rgba(255,255,255,.07);
-  transition: width var(--open-dur) var(--ease-open), transform 180ms var(--ease-out), filter 150ms var(--ease-out), box-shadow 180ms var(--ease-out);
+  transition: width var(--open-dur) var(--ease-open), transform 180ms var(--ease-out), filter 150ms var(--ease-out),
+    box-shadow 180ms var(--ease-out), margin 180ms var(--ease-out);
 }
 .spine:active { transform: none; }
 .spine:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -221,9 +222,9 @@ body.notext .spine .lbl, body.notext .spine .mark { visibility: hidden; }
 
 /* lift: the spine under the cursor rises out of the shelf, its neighbours a little less
    (app.js sets --lift), like flicking through records in a crate. Touch: the one under your finger. */
-.spine.lift:not(.open) {   /* up and in front: over the frame, its neighbours and their shadows */
-  z-index: 1; transform: translateY(calc(var(--lift, 1) * -1 * min(7%, 24px)));
-  box-shadow: inset -1px 0 0 rgba(0,0,0,.65), inset 1px 0 0 rgba(255,255,255,.07), 0 calc(var(--lift, 1) * 12px) calc(var(--lift, 1) * 22px) rgba(0,0,0,.55);
+.spine.lift:not(.open) {   /* grows up from the floor, over the frame, in front of its neighbours */
+  z-index: 1; margin-top: calc(var(--lift, 1) * -1 * min(calc(var(--screen-h) * .07), 24px));
+  box-shadow: inset -1px 0 0 rgba(0,0,0,.65), inset 1px 0 0 rgba(255,255,255,.07), 0 0 calc(var(--lift, 1) * 20px) rgba(0,0,0,.6);
 }
 .spine .cover.nocover {
   display: flex; flex-direction: column; justify-content: flex-end; gap: .35em; padding: 9%; white-space: normal;
@@ -238,7 +239,7 @@ body.notext .spine .lbl, body.notext .spine .mark { visibility: hidden; }
 @keyframes fade-in { from { opacity: 0; } }
 
 /* manual arranging: the held spine lifts; app.js slides its neighbours aside with `translate` */
-.spine.picked { z-index: 2; filter: brightness(1.2); box-shadow: 0 0 0 2px var(--accent), 0 0 30px rgba(0,0,0,.8); transform: translateY(-3%); }
+.spine.picked { z-index: 2; filter: brightness(1.2); box-shadow: 0 0 0 2px var(--accent), 0 0 30px rgba(0,0,0,.8); margin-top: calc(-1 * min(calc(var(--screen-h) * .04), 16px)); }
 body.arranging #row { cursor: default; }
 
 /* empty state lives on the screen itself */
@@ -490,15 +491,15 @@ body.vertical #row { flex-direction: column; overflow-x: hidden; overflow-y: aut
 body.vertical #row > .spine:first-child { margin-left: 0; margin-top: auto; }
 body.vertical #row > .spine:last-child { margin-right: 0; margin-bottom: auto; }
 body.vertical .spine {
-  width: 100%; height: var(--w);
+  width: auto; height: var(--w);   /* width: the stack's, by stretching */
   background:
     linear-gradient(180deg, rgba(255,255,255,.13), rgba(255,255,255,.02) 16%, rgba(0,0,0,0) 62%, rgba(0,0,0,.42)),
     linear-gradient(90deg, rgba(255,255,255,.05), rgba(0,0,0,.18)),
     var(--c);
   box-shadow: inset 0 -1px 0 rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.07);
-  transition: height var(--open-dur) var(--ease-open), transform 180ms var(--ease-out), filter 150ms var(--ease-out);
+  transition: height var(--open-dur) var(--ease-open), transform 180ms var(--ease-out), filter 150ms var(--ease-out), margin 180ms var(--ease-out);
 }
-body.vertical .spine.open { width: 100%; height: var(--screen-h); }
+body.vertical .spine.open { width: auto; height: var(--screen-h); }
 body.vertical .spine .lbl { inset: 0 calc(var(--screen-h) * .13) 0 calc(var(--screen-h) * .06); writing-mode: horizontal-tb; }
 body.vertical .spine .mark { /* a thin rule, not a box: a box at the end of a row reads as a checkbox */
   left: auto; right: calc(var(--screen-h) * .045); top: 28%; bottom: 28%; height: auto; width: 2px;
@@ -507,12 +508,15 @@ body.vertical .spine .mark { /* a thin rule, not a box: a box at the end of a ro
 body.vertical .spine.band::before { right: auto; bottom: 0; height: auto; width: calc(var(--screen-h) * .04); }
 body.vertical .spine.playlist .mark { left: auto; top: 50%; bottom: auto; width: 6px; height: 6px; margin: -3px 0 0; border-radius: 50%; opacity: .45; }
 body.vertical { --out: 1.42; }   /* the record comes out downwards, a little less: the stack stays in view */
-body.vertical .spine.open.out { width: 100%; height: calc(var(--screen-h) * var(--out)); }
+body.vertical .spine.open.out { width: auto; height: calc(var(--screen-h) * var(--out)); }
 body.vertical .spine.open.out .cover { width: 100%; height: var(--screen-h); box-shadow: 0 10px 24px rgba(0,0,0,.45); }
 body.vertical .spine.open.out .vinyl { translate: 0 calc(var(--screen-h) * (var(--out) - 1)); }
 body.vertical .spine.open.out .pill { left: 50%; bottom: calc(100% - var(--screen-h) * .94); }
-body.vertical .spine.lift:not(.open) { transform: translateX(calc(var(--lift, 1) * -5%)); box-shadow: inset 0 -1px 0 rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.07); }
-body.vertical .spine.picked { transform: translateX(-3%); }
+body.vertical .spine.lift:not(.open) {
+  margin-top: 0; margin-left: calc(var(--lift, 1) * -1 * min(calc(var(--screen-h) * .05), 18px));
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.07);
+}
+body.vertical .spine.picked { margin-top: 0; margin-left: calc(-1 * min(calc(var(--screen-h) * .03), 12px)); }
 body.vertical #hint { display: none; }
 body.vertical #index {
   position: absolute; z-index: 6; right: 2px; top: 50%; transform: translateY(-50%);

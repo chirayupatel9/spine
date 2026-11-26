@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -130,13 +131,19 @@ fun Spine(
         modifier
             .then(if (vertical) Modifier.fillMaxWidth().height(extent) else Modifier.fillMaxHeight().width(extent))
             .zIndex(if (lift > 0f) 1f else 0f)   // in front of its neighbours while it's up
-            .graphicsLayer {   // lifted out of the shelf: sideways in the stack, up over the frame on the wall
-                if (vertical) translationX = -lift * size.width * .05f
-                else {
-                    translationY = -lift * minOf(size.height * .07f, 24.dp.toPx())
-                    shadowElevation = lift * 10.dp.toPx()
+            .layout { m, c ->
+                // Lifted, it grows out of the shelf, up over the frame on the wall, out to the left in the
+                // stack, while its foot stays put: moving it instead would leave a dark gap under it.
+                val reach = (lift * if (vertical) minOf(cross.toPx() * .05f, 18.dp.toPx()) else minOf(cross.toPx() * .07f, 24.dp.toPx())).roundToInt()
+                when {
+                    reach <= 0 -> m.measure(c).let { p -> layout(p.width, p.height) { p.place(0, 0) } }
+                    vertical -> m.measure(c.copy(minWidth = c.maxWidth + reach, maxWidth = c.maxWidth + reach))
+                        .let { p -> layout(c.maxWidth, p.height) { p.place(-reach, 0) } }
+                    else -> m.measure(c.copy(minHeight = c.maxHeight + reach, maxHeight = c.maxHeight + reach))
+                        .let { p -> layout(p.width, c.maxHeight) { p.place(0, -reach) } }
                 }
             }
+            .graphicsLayer { if (!vertical) shadowElevation = lift * 10.dp.toPx() }
             .clipToBounds()
             .drawBehind { if (outFrac <= 0f || coverAlpha < 1f) drawSpine(base, ink, vertical, band, cross.toPx(), pressed || lifted) }
             .then(if (lifted) Modifier.border(2.dp, Palette.Accent) else Modifier)
