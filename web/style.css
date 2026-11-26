@@ -164,7 +164,49 @@ body.notext .spine .lbl, body.notext .spine .mark { visibility: hidden; }
 .paused .eq i { animation: none; transform: scaleY(.35); }
 @keyframes eq { 0%, 100% { transform: scaleY(.3) } 50% { transform: scaleY(1) } }
 
-#row.instant .spine, #row.instant .cover, #row.instant .pill { transition: none !important; }
+#row.instant .spine, #row.instant .cover, #row.instant .pill, #row.instant .vinyl { transition: none !important; }
+
+/* a record: grooves and the light on them stay put; only the label turns (app.js spins it up when
+   the music starts and lets it coast to a stop on pause) */
+.vinyl {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  background:
+    radial-gradient(circle, transparent 0 35%, rgba(255,255,255,.05) 35.6%, transparent 37%,
+      transparent 52%, rgba(255,255,255,.035) 52.6%, transparent 53.6%,
+      transparent 68%, rgba(255,255,255,.035) 68.6%, transparent 69.6%,
+      transparent 95%, rgba(255,255,255,.08) 96.4%, rgba(0,0,0,.55) 98.6%),
+    repeating-radial-gradient(circle, rgba(255,255,255,.028) 0 1px, transparent 1px 3px),
+    radial-gradient(circle, #1d1c1b, #0b0b0b 72%, #151515);
+  box-shadow: 0 10px 30px rgba(0,0,0,.55);
+}
+.vinyl .label { position: absolute; inset: 32%; border-radius: 50%; overflow: hidden; background: var(--lc, #3a3632); box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
+.vinyl .label img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vinyl .label::after { /* the spindle hole */
+  content: ""; position: absolute; left: 50%; top: 50%; width: 10%; height: 10%; transform: translate(-50%, -50%); border-radius: 50%;
+  background: #0c0a08; box-shadow: inset 0 1px 2px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.12);
+}
+.vinyl .sheen {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 210deg, transparent 0 6%, rgba(255,255,255,.13) 12%, transparent 19% 50%, rgba(255,255,255,.09) 62%, transparent 70%);
+  -webkit-mask: radial-gradient(circle, transparent 35%, #000 36%); mask: radial-gradient(circle, transparent 35%, #000 36%);
+}
+
+/* the playing album's record slides out of its sleeve: the slot widens and the record follows it out.
+   --out is how wide the slot gets, in screen heights (app.js reads it to centre the album). */
+:root { --out: 1.62; }
+.spine .vinyl {
+  left: calc(var(--screen-h) * .03); top: calc(var(--screen-h) * .03); width: calc(var(--screen-h) * .94); height: calc(var(--screen-h) * .94);
+  opacity: 0; transition: translate var(--open-dur) var(--ease-open), opacity 160ms var(--ease-out);
+}
+.spine.open .vinyl { opacity: 1; transition: translate var(--open-dur) var(--ease-open), opacity 120ms var(--ease-out); }
+.spine.open.out { width: calc(var(--screen-h) * var(--out)); background: transparent; box-shadow: none; }
+.spine.open.out .cover { width: var(--screen-h); box-shadow: 10px 0 24px rgba(0,0,0,.45); }
+.spine.open.out .vinyl { translate: calc(var(--screen-h) * (var(--out) - 1)) 0; pointer-events: auto; cursor: pointer; }
+.spine.open.out .pill { left: calc(var(--screen-h) / 2); }
+
+/* lift: the spine under the cursor rises out of the shelf, its neighbours a little less
+   (app.js sets --lift), like flicking through records in a crate. Touch: the one under your finger. */
+.spine.lift:not(.open) { transform: translateY(calc(var(--lift, 1) * -6%)); }
 .spine .cover.nocover {
   display: flex; flex-direction: column; justify-content: flex-end; gap: .35em; padding: 9%; white-space: normal;
   background: var(--c); color: var(--t); font-size: calc(var(--screen-h) * .075); line-height: 1.05;
@@ -282,6 +324,102 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
 #toast { translate: 0 -8px; }
 #toast.in, #scanToast.in { opacity: 1; translate: none; transition-duration: 260ms; }
 
+/* ------------------------------------------------ now playing: the full-screen player
+   Rises from the bar (tap or swipe it up), goes back down with the chevron, a swipe down, Escape or
+   Back. app.js adds .in to show it and .out to slide the record out of the sleeve. */
+@property --np-c { syntax: "<color>"; inherits: true; initial-value: #2a2622; }
+#player { cursor: pointer; }
+.np {
+  position: fixed; inset: 0; z-index: 15; overflow: hidden; background: var(--bg); color: var(--ink);
+  --cs: min(calc((100vw - 40px) / 1.25), 44vh, 400px);   /* cover size; the stage is 1.25 covers wide */
+  transform: translateY(100%); transition: transform 280ms var(--ease-out), --np-c 700ms var(--ease-in-out);
+}
+.np.in { transform: none; transition: transform 460ms var(--ease-open), --np-c 700ms var(--ease-in-out); }
+.np.dragging { transition: none; }
+.np-bg {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,.22), transparent 18%),
+    radial-gradient(140% 80% at 50% 0%, color-mix(in srgb, var(--np-c) 58%, #0c0a08) 0%, color-mix(in srgb, var(--np-c) 20%, #0c0a08) 52%, #0c0a08 88%);
+}
+.np-inner {
+  position: relative; height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+  display: flex; flex-direction: column; align-items: center;
+  padding: max(8px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+}
+.np-inner::-webkit-scrollbar { display: none; }
+.np-head { width: 100%; max-width: 560px; display: grid; grid-template-columns: 48px minmax(0, 1fr) 48px; align-items: center; min-height: 56px; flex: none; }
+.np-head .icon { color: var(--ink); width: 48px; height: 48px; }
+.np-head .icon svg { width: 24px; height: 24px; }
+.np-from { text-align: center; min-width: 0; line-height: 1.3; }
+.np-from span { display: block; font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.np-from b { display: block; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-stage { position: relative; flex: none; width: calc(var(--cs) * 1.25); height: var(--cs); margin: clamp(10px, 4vh, 40px) 0 clamp(18px, 4.5vh, 40px); }
+.np-cover {
+  position: absolute; left: 0; top: 0; z-index: 1; width: var(--cs); height: var(--cs); object-fit: cover; border-radius: 4px;
+  background: var(--np-c); box-shadow: 0 30px 60px -14px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.06);
+  translate: calc(var(--cs) * .125) 0; transition: translate 620ms var(--ease-open);
+}
+.np .vinyl {
+  left: calc(var(--cs) * .03); top: calc(var(--cs) * .03); width: calc(var(--cs) * .94); height: calc(var(--cs) * .94);
+  translate: calc(var(--cs) * .125) 0; transition: translate 620ms var(--ease-open);
+}
+.np.out .np-cover { translate: 0 0; }
+.np.out .vinyl { translate: calc(var(--cs) * .25) 0; }
+.np-body { width: 100%; max-width: 440px; display: flex; flex-direction: column; flex: none; }
+.np-meta { min-width: 0; margin-bottom: 14px; }
+#npTitle { font-family: var(--serif); font-weight: 400; font-size: clamp(22px, 6.2vw, 30px); line-height: 1.18; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#npArtist { color: var(--muted); font-size: 15px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-bar { position: relative; height: 28px; cursor: pointer; touch-action: none; --f: 0; }
+.np-track { position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px; background: rgba(255,255,255,.18); overflow: hidden; }
+.np-fill { position: absolute; inset: 0; background: rgba(255,255,255,.9); transform-origin: left; transform: scaleX(var(--f)); transition: transform 250ms linear; }
+.np-thumb {
+  position: absolute; top: 50%; left: calc(var(--f) * 100%); width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); transform: scale(.8);
+  transition: left 250ms linear, transform 160ms var(--ease-out);
+}
+.np-bar.jump .np-fill, .np-bar.seeking .np-fill { transition: none; }
+.np-bar.jump .np-thumb, .np-bar.seeking .np-thumb { transition: transform 160ms var(--ease-out); }
+.np-bar.seeking .np-thumb { transform: scale(1.2); }
+.np-bar.fixed { cursor: default; }
+.np-bar.fixed .np-thumb { display: none; }
+.np-times { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.np-ctrl { display: flex; align-items: center; justify-content: space-between; margin: 12px -8px 6px; }
+.np-ctrl .icon { position: relative; color: var(--ink); width: 52px; height: 52px; }
+.np-ctrl .icon svg { width: 28px; height: 28px; }
+.np-ctrl #npShuffle, .np-ctrl #npRepeat { color: var(--muted); }
+.np-ctrl #npShuffle svg, .np-ctrl #npRepeat svg { width: 22px; height: 22px; }
+.np-ctrl #npShuffle.on, .np-ctrl #npRepeat.on { color: var(--accent); }
+#npShuffle.on::after, #npRepeat.on::after { /* lit toggles carry a dot, as on any good player */
+  content: ""; position: absolute; left: 50%; bottom: 6px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: currentColor;
+}
+#npRepeat.one::before {
+  content: "1"; position: absolute; top: 9px; right: 8px; width: 13px; height: 13px; border-radius: 50%;
+  display: grid; place-items: center; font: 700 9px/1 var(--sans); color: #fff; background: var(--accent);
+}
+.np-ctrl .np-play { width: 72px; height: 72px; background: #fff; color: #111; box-shadow: 0 10px 26px rgba(0,0,0,.35); }
+.np-ctrl .np-play svg { width: 30px; height: 30px; }
+.np .np-device { display: inline-flex; align-self: center; margin-top: 4px; max-width: 100%; }
+.np-next { margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); }
+.np-next h3 { margin: 0 0 4px; font-size: 11.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+#npQueue { list-style: none; margin: 0; padding: 0; }
+#npQueue li { display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 4px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 14px; }
+#npQueue .n { width: 22px; flex: none; text-align: right; color: var(--faint); font-variant-numeric: tabular-nums; }
+#npQueue .tt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#npQueue .d { color: var(--faint); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+/* wide screens and phones on their side: the record on the left, everything else on the right */
+@media (min-width: 640px) and (min-aspect-ratio: 5/4) {
+  .np { --cs: min(38vw, 60vh, 520px); }
+  .np-inner { display: grid; grid-template-columns: auto minmax(300px, 420px); grid-template-rows: auto minmax(0, 1fr); column-gap: clamp(36px, 6vw, 110px); justify-content: center; align-items: center; overflow: hidden; }
+  .np-head { grid-column: 1 / -1; max-width: none; }
+  .np-stage { margin: 0; }
+  .np-body { max-height: 100%; overflow-y: auto; scrollbar-width: none; padding: 8px 0; }
+  .np-body::-webkit-scrollbar { display: none; }
+  #npQueue { max-height: calc(var(--cs) * .42); overflow-y: auto; scrollbar-width: none; }   /* the controls stay level with the cover */
+  #npQueue::-webkit-scrollbar { display: none; }
+  .np-next { margin-top: 18px; }
+}
+
 /* ------------------------------------------------ hover only where there is a real pointer,
    so a tap on a tablet doesn't leave things lit */
 @media (hover: hover) and (pointer: fine) {
@@ -290,7 +428,8 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
   .seg button:hover, #index button:hover, .device:hover { color: var(--ink); }
   .spine:hover { filter: brightness(1.12); }
   .p-ctrl .big:hover { background: #fff; }
-  #aTracks li:hover { background: rgba(255,255,255,.03); }
+  #aTracks li:hover, #npQueue li:hover { background: rgba(255,255,255,.04); }
+  .np-bar:hover .np-thumb { transform: scale(1); }
 }
 
 /* ------------------------------------------------ reduced motion: nothing moves, things still fade */
@@ -305,6 +444,9 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
   .album-card, .panel { transform: none; }
   #toast, #scanToast { translate: none; }
   button:active { transform: none; }
+  .np { transform: none; opacity: 0; transition: opacity 200ms var(--ease-out); }
+  .np.in { transform: none; opacity: 1; transition: opacity 200ms var(--ease-out); }
+  .np-cover, .np .vinyl { transition: none; }
 }
 
 /* ------------------------------------------------ phones: the shelf turns 90 degrees
@@ -337,6 +479,12 @@ body.vertical .spine .mark { /* a thin rule, not a box: a box at the end of a ro
   border: 0; border-radius: 1px; background: currentColor; opacity: .3;
 }
 body.vertical .spine.band::before { right: auto; bottom: 0; height: auto; width: calc(var(--screen-h) * .04); }
+body.vertical { --out: 1.42; }   /* the record comes out downwards, a little less: the stack stays in view */
+body.vertical .spine.open.out { width: 100%; height: calc(var(--screen-h) * var(--out)); }
+body.vertical .spine.open.out .cover { width: 100%; height: var(--screen-h); box-shadow: 0 10px 24px rgba(0,0,0,.45); }
+body.vertical .spine.open.out .vinyl { translate: 0 calc(var(--screen-h) * (var(--out) - 1)); }
+body.vertical .spine.open.out .pill { left: 50%; bottom: calc(100% - var(--screen-h) * .94); }
+body.vertical .spine.lift:not(.open) { transform: translateX(calc(var(--lift, 1) * -5%)); }
 body.vertical .spine.picked { transform: translateX(-3%); }
 body.vertical #hint { display: none; }
 body.vertical #index {
@@ -344,8 +492,19 @@ body.vertical #index {
   margin: 0; min-height: 0; max-width: none; padding: 6px 0;
   flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 0; touch-action: none;
 }
-body.vertical #index button { min-width: 30px; min-height: 0; height: var(--ih, 22px); padding: 0; font-size: 10px; letter-spacing: 0; border-radius: 6px; }
+body.vertical #index button { min-width: 30px; min-height: 0; height: var(--ih, 22px); padding: 0; font-size: 10.5px; font-weight: 700; letter-spacing: 0; border-radius: 6px; color: rgba(255,255,255,.62); }
+body.vertical #index button.on { color: var(--accent); }
 body.vertical #index.scrubbing button.on { color: #fff; }
+/* orders without letters (manual, recently added, colour): the rail is a handle to drag instead */
+body.vertical #index.thumb { top: 10px; bottom: 16px; transform: none; width: 32px; right: 2px; padding: 0; cursor: grab; }
+#index.thumb::before { content: ""; position: absolute; left: 50%; top: 4px; bottom: 4px; width: 2px; margin-left: -1px; border-radius: 1px; background: rgba(255,255,255,.1); }
+.rail-thumb {
+  position: absolute; left: 50%; top: 0; width: 6px; height: 48px; margin-left: -3px; border-radius: 3px;
+  background: rgba(255,255,255,.55); box-shadow: 0 0 0 4px rgba(12,10,8,.35);
+  transition: background-color 150ms var(--ease-out), width 150ms var(--ease-out), margin 150ms var(--ease-out);
+}
+#index.thumb.scrubbing { cursor: grabbing; }
+#index.thumb.scrubbing .rail-thumb { background: var(--accent); width: 8px; margin-left: -4px; }
 #scrubBubble {
   position: absolute; z-index: 7; right: 44px; width: 60px; height: 60px; margin-top: -30px; border-radius: 50%;
   display: grid; place-items: center; pointer-events: none;
@@ -353,6 +512,8 @@ body.vertical #index.scrubbing button.on { color: #fff; }
   opacity: 0; transform: scale(.85); transition: opacity 120ms var(--ease-out), transform 180ms var(--ease-out);
 }
 #scrubBubble.on { opacity: 1; transform: none; }
+#scrubBubble.wide { width: auto; min-width: 60px; padding: 0 18px; border-radius: 30px; font: 600 15px/1 var(--sans); letter-spacing: .02em; white-space: nowrap; }
+#scrubBubble.swatch { background: var(--sw); box-shadow: inset 0 0 0 3px rgba(255,255,255,.85), 0 12px 30px rgba(0,0,0,.5); }
 body.vertical.wallmode #room { padding: 0; }
 body.vertical.wallmode #device { padding: 0; border-radius: 0; }
 body.vertical.wallmode #screen { border-radius: 0; }

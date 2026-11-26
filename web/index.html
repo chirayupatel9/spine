@@ -29,6 +29,9 @@
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="19" cy="12" r="1.7" fill="currentColor"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4.5 10.5V9.5a3 3 0 0 1 3-3h11M15.5 3.5l3 3-3 3M19.5 13.5v1a3 3 0 0 1-3 3h-11M8.5 20.5l-3-3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </svg>
 
   <header id="topbar">
@@ -92,6 +95,38 @@
     <div class="p-time"><span id="pPos">0:00</span><div class="p-progress"><div id="pBar"></div></div><span id="pDur">0:00</span></div>
     <button class="device" id="pDevice" title="Choose speaker"><svg><use href="#i-speaker"/></svg><span id="pDeviceName"></span></button>
   </footer>
+
+  <!-- now playing: tap (or swipe up) the player bar; swipe down or the chevron to close -->
+  <section id="nowPlaying" class="np" hidden aria-label="Now playing">
+    <div class="np-bg" aria-hidden="true"></div>
+    <div class="np-inner">
+      <header class="np-head np-grab">
+        <button class="icon" id="npClose" title="Close"><svg><use href="#i-down"/></svg></button>
+        <div class="np-from"><span>Playing from</span><b id="npFrom"></b></div>
+        <button class="icon" id="npTracks" title="Album and tracks"><svg><use href="#i-list"/></svg></button>
+      </header>
+      <div class="np-stage np-grab">
+        <div class="vinyl" id="npVinyl"><span class="label"><img alt="" id="npLabel"></span><span class="sheen"></span></div>
+        <img id="npCover" class="np-cover" alt="">
+      </div>
+      <div class="np-body">
+        <div class="np-meta"><div id="npTitle"></div><div id="npArtist"></div></div>
+        <div class="np-seek">
+          <div class="np-bar" id="npBar"><div class="np-track"><div class="np-fill" id="npFill"></div></div><div class="np-thumb" id="npThumb"></div></div>
+          <div class="np-times"><span id="npPos">0:00</span><span id="npDur">0:00</span></div>
+        </div>
+        <div class="np-ctrl">
+          <button class="icon" id="npShuffle" title="Shuffle"><svg><use href="#i-shuffle"/></svg></button>
+          <button class="icon" id="npPrev" title="Previous"><svg><use href="#i-prev"/></svg></button>
+          <button class="icon np-play" id="npToggle" title="Play/pause"><svg><use href="#i-pause"/></svg></button>
+          <button class="icon" id="npNext" title="Next"><svg><use href="#i-next"/></svg></button>
+          <button class="icon" id="npRepeat" title="Repeat"><svg><use href="#i-repeat"/></svg></button>
+        </div>
+        <button class="device np-device" id="npDevice" title="Choose speaker"><svg><use href="#i-speaker"/></svg><span id="npDeviceName"></span></button>
+        <div class="np-next" id="npNextWrap"><h3>Up next</h3><ol id="npQueue"></ol></div>
+      </div>
+    </div>
+  </section>
 
   <!-- album details (tap the open cover) -->
   <div id="albumSheet" class="sheet" hidden>

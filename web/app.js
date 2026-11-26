@@ -250,7 +250,10 @@ function render() {
   for (const a of list) {
     const el = makeSpine(a);
     if (fresh?.has(a.id)) { el.classList.add("arrive"); el.style.setProperty("--d", Math.min(k++ * 18, 360) + "ms"); }
-    if (a.id === S.openId) { el.classList.add("open"); addCover(el, a); }
+    if (a.id === S.openId) {
+      el.classList.add("open"); addCover(el, a);
+      if (Player.mode && Player.albumId() === a.id) { addVinyl(el, a); el.classList.add("out"); setSpin(el.querySelector(".vinyl .label"), Player.playing(), true); }
+    }
     S.els.set(a.id, el);
     frag.appendChild(el);
   }
@@ -267,11 +270,21 @@ function render() {
 function renderIndex() {
   const nav = $("#index");
   nav.innerHTML = "";
-  S.keyAt = null;
-  if (S.list.length < 8) return;
+  nav.classList.remove("thumb");
+  S.keyAt = null; S.thumb = null;
   const firsts = new Map();
-  for (const a of S.list) { const k = indexKey(a); if (k !== null && !firsts.has(k)) firsts.set(k, a.id); }
-  if (firsts.size < 2) return;
+  if (S.list.length >= 8) for (const a of S.list) { const k = indexKey(a); if (k !== null && !firsts.has(k)) firsts.set(k, a.id); }
+  if (firsts.size < 2) {
+    // No letters in this order (manual, recently added, colour). On a phone the rail becomes a
+    // handle you drag instead, with a bubble saying where you are.
+    if (S.vertical && S.list.length >= 12 && ax.total() > ax.view() * 1.5) {
+      nav.classList.add("thumb");
+      nav.innerHTML = '<i class="rail-thumb"></i>';
+      S.thumb = nav.firstChild;
+      placeThumb();
+    }
+    return;
+  }
   S.keyAt = new Map(S.list.map(a => [a.id, indexKey(a)]));
   for (const [k, id] of firsts) {
     const b = document.createElement("button");
@@ -293,15 +306,32 @@ function jumpTo(id, animate) {
   if (el) scrollRowTo(clamp(ax.start(el) - 1, 0, ax.total() - ax.view()), animate);
 }
 
-let idxRaf = 0;
-function markIndex() {
-  idxRaf = 0;
-  if (!S.keyAt) return;
+/* The spine in the middle of the view. */
+function spineAtMiddle() {
   const kids = ROW.children, mid = ax.pos() + ax.view() / 2;
   let lo = 0, hi = kids.length - 1;
   while (lo < hi) { const m = (lo + hi + 1) >> 1; if (ax.start(kids[m]) <= mid) lo = m; else hi = m - 1; }
-  const key = kids[lo] && S.keyAt.get(kids[lo].dataset.id);
+  return kids[lo] || null;
+}
+
+let idxRaf = 0;
+function markIndex() {
+  idxRaf = 0;
+  Lift.follow();
+  if (S.thumb) return void placeThumb();
+  if (!S.keyAt) return;
+  const key = S.keyAt.get(spineAtMiddle()?.dataset.id);
   $$("#index button").forEach(b => b.classList.toggle("on", b.dataset.key === key));
+}
+
+/* The handle's length shows how much of the stack is in view, its place how far down you are. */
+function placeThumb() {
+  const t = S.thumb, track = rail.clientHeight, total = ax.total(), view = ax.view(), max = total - view;
+  const h = Math.round(clamp(track * view / Math.max(1, total), 40, track * 0.5));
+  if (t.offsetHeight !== h) t.style.height = h + "px";
+  const y = (max > 0 ? clamp(ax.pos() / max, 0, 1) : 0) * (track - h);
+  t.style.transform = `translateY(${y.toFixed(1)}px)`;
+  return { y, h, track };
 }
 
 function updateHint() {
@@ -320,15 +350,18 @@ function setOpen(id, animate = true) {
   if (S.openId === id) { if (id) centerOn(id, animate); return; }
   const prev = S.openId && S.els.get(S.openId);
   if (prev) {
-    prev.classList.remove("open");
-    setTimeout(() => { if (!prev.classList.contains("open")) prev.querySelectorAll(".cover,.pill").forEach(n => n.remove()); }, 700);
+    prev.classList.remove("open", "out");
+    setSpin(prev.querySelector(".vinyl .label"), false);
+    setTimeout(() => { if (!prev.classList.contains("open")) prev.querySelectorAll(".cover,.pill,.vinyl").forEach(n => n.remove()); }, 700);
   }
   S.openId = id;
   const el = id && S.els.get(id);
   if (el) {
     addCover(el, S.byId.get(id));
+    el.classList.remove("lift");
     void el.offsetWidth;
     el.classList.add("open");
+    el._openedAt = performance.now();
     centerOn(id, animate);
   }
   setGlow();
@@ -341,8 +374,9 @@ function setOpen(id, animate = true) {
 function centerOn(id, animate) {
   const row = $("#row");
   let x = 0, target = null;
+  const out = S.H * (parseFloat(getComputedStyle(document.body).getPropertyValue("--out")) || 1.62);
   for (const el of row.children) {
-    const w = el.dataset.id === id ? S.H : el.classList.contains("open") ? S.H : +el.dataset.w;
+    const w = el.dataset.id === id || el.classList.contains("open") ? (el.classList.contains("out") ? out : S.H) : +el.dataset.w;
     if (el.dataset.id === id) target = x + w / 2;
     x += w;
   }
@@ -377,6 +411,7 @@ function scrollRowTo(left, animate, { dur, ease } = {}) {
 function updatePill() {
   const el = S.openId && S.els.get(S.openId);
   if (!el) return;
+  syncVinyl(el);
   const pill = el.querySelector(".pill");
   if (!pill) return;
   const isPlayingAlbum = Player.albumId() === S.openId;
@@ -385,6 +420,98 @@ function updatePill() {
   pill.querySelector(".pl").textContent = playing ? "Now playing" : isPlayingAlbum ? "Paused" : "Tap for tracks";
   pill.querySelector(".eq").hidden = !isPlayingAlbum;
 }
+
+/* The record in the open album's sleeve. When that album is the one playing, the slot widens and
+   the record slides out into it, a moment after the album has opened, then spins while it plays. */
+function addVinyl(el, a) {
+  if (el.querySelector(".vinyl")) return;
+  const v = document.createElement("span");
+  v.className = "vinyl";
+  v.innerHTML = `<span class="label" style="--lc:${esc(a?.color || "#3a3632")}">${a?.art ? `<img alt="" draggable="false" src="${esc(a.art)}">` : ""}</span><span class="sheen"></span>`;
+  const cover = el.querySelector(".cover");
+  if (cover) cover.before(v); else el.appendChild(v);
+}
+let outT = 0;
+function syncVinyl(el) {
+  const mine = !!Player.mode && Player.albumId() === el.dataset.id;
+  if (mine !== el.classList.contains("out")) {
+    clearTimeout(outT);
+    const go = () => {
+      if (S.els.get(S.openId) !== el || !el.classList.contains("open")) return;
+      const now = !!Player.mode && Player.albumId() === el.dataset.id;
+      if (now === el.classList.contains("out")) return;
+      if (now) { addVinyl(el, S.byId.get(el.dataset.id)); void el.offsetWidth; }
+      el.classList.toggle("out", now);
+      centerOn(el.dataset.id, true);
+      setSpin(el.querySelector(".vinyl .label"), now && Player.playing());
+    };
+    const wait = mine && !reduceMotion.matches ? (el._openedAt || 0) + cssMs("--open-dur") * 0.6 - performance.now() : 0;
+    if (wait > 0) outT = setTimeout(go, wait); else go();
+    return;
+  }
+  if (mine) setSpin(el.querySelector(".vinyl .label"), Player.playing());
+}
+
+/* Spin a record's label like a turntable: it speeds up over half a second when the music starts and
+   coasts to a stop when it pauses, rather than freezing mid-turn. 33⅓ rpm is 1.8 s a turn. */
+function setSpin(el, on, instant = false) {
+  if (!el) return;
+  if (reduceMotion.matches) on = false;
+  let s = el._spin;
+  if (!s) {
+    if (!on) return;
+    const anim = el.animate([{ transform: "rotate(0turn)" }, { transform: "rotate(1turn)" }], { duration: 1800, iterations: Infinity });
+    anim.pause();
+    s = el._spin = { anim, rate: 0, target: 0, raf: 0 };
+  }
+  const target = on ? 1 : 0;
+  if (s.target === target && !instant && (s.raf || s.rate === target)) return;
+  s.target = target;
+  cancelAnimationFrame(s.raf); s.raf = 0;
+  const apply = () => {
+    if (s.rate <= 0) return s.anim.pause();
+    s.anim.playbackRate = s.rate;   // the angle is kept; only the speed changes
+    if (s.anim.playState !== "running") s.anim.play();
+  };
+  if (instant) { s.rate = target; return apply(); }
+  let last = performance.now();
+  const step = now => {
+    const dt = Math.min(50, now - last); last = now;
+    s.rate = target > s.rate ? Math.min(target, s.rate + dt / 500) : Math.max(target, s.rate - dt / 1100);
+    apply();
+    s.raf = s.rate === target ? 0 : requestAnimationFrame(step);
+  };
+  s.raf = requestAnimationFrame(step);
+}
+
+/* Lift: the spine under the cursor rises out of the shelf and its neighbours follow a little, like
+   flicking through records in a crate. On a touch screen, the spine under your finger lifts. */
+const Lift = {
+  els: [], at: null, x: 0, y: 0, mouse: false,
+  set(center, wave = true) {
+    if (reduceMotion.matches || document.body.classList.contains("arranging")) center = null;
+    const next = new Map();
+    if (center && !center.classList.contains("open")) {
+      next.set(center, 1);
+      let a = center.previousElementSibling, b = center.nextElementSibling;
+      for (const v of wave ? [0.42, 0.14] : []) {
+        if (a) { next.set(a, v); a = a.previousElementSibling; }
+        if (b) { next.set(b, v); b = b.nextElementSibling; }
+      }
+    }
+    for (const el of this.els) if (!next.has(el)) el.classList.remove("lift");
+    for (const [el, v] of next) { el.style.setProperty("--lift", v); el.classList.add("lift"); }
+    this.els = [...next.keys()];
+    this.at = center;
+  },
+  clear() { if (this.els.length) this.set(null); this.at = null; },
+  // The shelf moved under a still cursor: lift whatever is under it now.
+  follow() {
+    if (!this.mouse) return;
+    const el = Drag.moved ? null : document.elementFromPoint(this.x, this.y)?.closest("#row .spine") || null;
+    if (el !== this.at) this.set(el);
+  },
+};
 
 /* Cross-fade two glow layers: the new colour is painted once on the hidden layer, then only
    opacity animates, which the compositor handles without repainting. */
@@ -457,6 +584,7 @@ row.addEventListener("click", e => {
   const el = e.target.closest(".spine");
   if (!el) return;
   const id = el.dataset.id;
+  if (e.target.closest(".vinyl")) { haptic(6); Player.toggle(); return; }   // touch the record to pause it
   if (id === S.openId) openSheet(id, el.querySelector(".cover"));
   else tapToPlay(id);
 });
@@ -464,9 +592,25 @@ row.addEventListener("click", e => {
 async function tapToPlay(id) {
   haptic(10);
   setOpen(id);
-  try { await Player.playAlbum(await detail(id), 0); }
+  try { await Player.playAlbum(await detail(id)); }
   catch (err) { toast(err.message); }
 }
+
+/* lift: the mouse lifts the spine it is over (and its neighbours); a finger, the one it is on */
+row.addEventListener("pointermove", e => {
+  if (e.pointerType !== "mouse") return;
+  Lift.mouse = true; Lift.x = e.clientX; Lift.y = e.clientY;
+  const el = Drag.moved || Arrange.picked ? null : e.target.closest(".spine");
+  if (el !== Lift.at) Lift.set(el);
+});
+row.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") { Lift.mouse = false; Lift.clear(); } });
+row.addEventListener("touchstart", e => {
+  const el = e.touches.length === 1 ? e.target.closest(".spine") : null;
+  Lift.mouse = false;
+  Lift.set(el, false);
+}, { passive: true });
+row.addEventListener("touchend", () => Lift.clear(), { passive: true });
+row.addEventListener("touchcancel", () => Lift.clear(), { passive: true });
 
 /* mouse: drag to scroll with a little momentum (touch screens scroll natively) */
 const Drag = { active: false, moved: false, startX: 0, startScroll: 0, lastX: 0, lastT: 0, v: 0, suppressClick: false };
@@ -535,9 +679,25 @@ row.addEventListener("keydown", e => {
 });
 
 /* Phones: the A-Z rail on the right. Touch it and slide: the stack jumps letter by letter under
-   your thumb, with a tick for each letter and a large one showing where you are. */
-const Scrub = { on: false, key: null };
+   your thumb, with a tick for each letter and a large one showing where you are. In an order
+   without letters the rail is a handle: drag it and the bubble shows the artist's initial, the
+   month the album arrived, or its colour. */
+const Scrub = { on: false, key: null, grab: 0 };
 const rail = $("#index"), bubble = $("#scrubBubble");
+function showBubble(y, { text = "", wide = false, swatch = null }) {
+  bubble.textContent = text;
+  bubble.classList.toggle("wide", wide);
+  bubble.classList.toggle("swatch", !!swatch);
+  if (swatch) bubble.style.setProperty("--sw", swatch);
+  bubble.style.top = (y - $("#room").getBoundingClientRect().top) + "px";
+  bubble.classList.add("on");
+}
+function bubbleFor(a) {
+  if (S.sort === "color") return { swatch: a.color };
+  if (S.sort === "added" && a.added_at) return { text: new Date(a.added_at * 1000).toLocaleDateString(undefined, { month: "short", year: "numeric" }), wide: true };
+  const c = artistKey(a.artist).normalize("NFKD")[0]?.toUpperCase() || "#";
+  return { text: /[A-Z]/.test(c) ? c : "#" };
+}
 function scrubAt(e) {
   const b = [...rail.children].find(x => { const r = x.getBoundingClientRect(); return e.clientY >= r.top && e.clientY < r.bottom; });
   if (!b || b.dataset.key === Scrub.key) return;
@@ -545,22 +705,35 @@ function scrubAt(e) {
   jumpTo(b.dataset.id, false);
   markIndex();
   haptic(4);
-  const room = $("#room").getBoundingClientRect(), r = b.getBoundingClientRect();
-  bubble.textContent = b.textContent;
-  bubble.style.top = (r.top + r.height / 2 - room.top) + "px";
-  bubble.classList.add("on");
+  const r = b.getBoundingClientRect();
+  showBubble(r.top + r.height / 2, { text: b.textContent });
+}
+function scrubThumb(e) {
+  const r = rail.getBoundingClientRect(), h = S.thumb.offsetHeight;
+  const f = clamp((e.clientY - r.top - Scrub.grab) / Math.max(1, r.height - h), 0, 1);
+  ax.set(f * (ax.total() - ax.view()));
+  const { y } = placeThumb();
+  const a = S.byId.get(spineAtMiddle()?.dataset.id);
+  if (!a) return;
+  const b = bubbleFor(a), key = b.swatch || b.text;
+  if (key !== Scrub.key) { if (Scrub.key !== null) haptic(3); Scrub.key = key; }
+  showBubble(r.top + y + h / 2, b);
 }
 function endScrub() { Scrub.on = false; Scrub.key = null; rail.classList.remove("scrubbing"); bubble.classList.remove("on"); }
 rail.addEventListener("pointerdown", e => {
-  if (!S.vertical || !e.target.closest("button")) return;
+  if (!S.vertical || (!S.thumb && !e.target.closest("button"))) return;
   e.preventDefault();
   stopScrollAnim();
   Scrub.on = true;
   try { rail.setPointerCapture(e.pointerId); } catch {}
   rail.classList.add("scrubbing");
-  scrubAt(e);
+  if (S.thumb) {   // hold the handle where you took it; a touch elsewhere brings it under your finger
+    const t = S.thumb.getBoundingClientRect();
+    Scrub.grab = e.clientY >= t.top && e.clientY <= t.bottom ? e.clientY - t.top : t.height / 2;
+    scrubThumb(e);
+  } else scrubAt(e);
 });
-rail.addEventListener("pointermove", e => { if (Scrub.on) scrubAt(e); });
+rail.addEventListener("pointermove", e => { if (Scrub.on) (S.thumb ? scrubThumb : scrubAt)(e); });
 rail.addEventListener("pointerup", endScrub);
 rail.addEventListener("pointercancel", endScrub);
 rail.addEventListener("click", e => { if (S.vertical && e.detail > 0) e.stopPropagation(); }, true);   // the press already jumped (keyboard clicks still work)
@@ -579,6 +752,7 @@ const Arrange = {
   pick(pointerId) {
     this.timer = 0;
     this.picked = true;
+    Lift.clear();
     Drag.active = false; row.classList.remove("dragging");
     this.el.classList.add("picked");
     document.body.classList.add("arranging");
@@ -748,9 +922,9 @@ $("#aTracks").addEventListener("click", e => {
 $("#aPlay").onclick = () => {
   if (Player.albumId() === S.sheet.id) { Player.toggle(); setTimeout(renderSheetState, 50); return; }
   setOpen(S.sheet.id);
-  Player.playAlbum(S.sheet, 0).then(renderSheetState);
+  Player.playAlbum(S.sheet).then(renderSheetState);
 };
-$("#aShuffle").onclick = () => { setOpen(S.sheet.id); Player.playAlbum(S.sheet, 0, true).then(renderSheetState); };
+$("#aShuffle").onclick = () => { setOpen(S.sheet.id); Player.playAlbum(S.sheet, null, true).then(renderSheetState); };
 $("#aPutBack").onclick = () => {
   if (Player.albumId() === S.sheet.id) Player.stop();
   setOpen(null);   // first, so the cover doesn't fly back onto a closing spine
@@ -796,33 +970,52 @@ $("#artFile").onchange = async e => {
 /* ======================================================== player */
 
 const audio = $("#audio");
+const shuffled = list => { const q = list.slice(); for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; } return q; };
 
 const Player = {
   mode: null,          // 'browser' (local files, demo previews) | 'spotify'
   album: null,
-  queue: [], index: 0,
+  order: [],           // the album's tracks, in album order
+  queue: [], index: 0, // the same tracks in the order they play (shuffled or not)
+  shuffle: store.get("shuffle", false),
+  repeat: store.get("repeat", "off"),   // off | all | one, for playback on this screen
   sp: null,            // last Spotify state
-  pollT: null,
+  spAt: 0,             // when it arrived, so the position can move on between polls
+  pollT: null, tickT: null,
+  cur: {},             // what is showing: title, artist, art, playing, device, pos, dur
 
   albumId() { return this.mode === "browser" ? this.album?.id : this.sp?.album_id; },
   playing() { return this.mode === "browser" ? !audio.paused : !!this.sp?.is_playing; },
   isTrack(id) { return this.mode === "browser" && this.queue[this.index]?.id === id; },
+  shuffleOn() { return this.mode === "spotify" ? !!this.sp?.shuffle : this.shuffle; },
+  repeatMode() { return this.mode === "spotify" ? ({ context: "all", track: "one" }[this.sp?.repeat] || "off") : this.repeat; },
+  canSeek() { return this.mode === "browser" ? audio.duration > 0 : this.mode === "spotify" && this.cur.dur > 0; },
 
-  async playAlbum(album, index = 0, shuffle = false) {
+  /* `index` is the track to start on. Leave it out to play the album from the top, or from a
+     random track when shuffle is on. */
+  async playAlbum(album, index = null, shuffle = false) {
     if (!album.track_list?.length) { toast("This album has no playable tracks"); return; }
-    if (album.source === "spotify") return this.playSpotify(album, index, shuffle);
+    if (album.source === "spotify") return this.playSpotify(album, index ?? 0, shuffle);
     if (this.mode === "spotify" && this.sp?.is_playing) api("/api/spotify/control", { method: "POST", body: { action: "pause" } }).catch(() => {});
     this.stopPolling();
+    if (shuffle && !this.shuffle) { this.shuffle = true; store.set("shuffle", true); }
     this.mode = "browser"; this.album = album;
-    let q = album.track_list.slice();
-    if (shuffle) { for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; } index = 0; }
-    this.queue = q; this.index = index;
+    this.order = album.track_list.slice();
+    if (this.shuffle) {
+      const first = (index !== null && this.order[index]) || this.order[Math.floor(Math.random() * this.order.length)];
+      this.queue = [first, ...shuffled(this.order.filter(t => t !== first))];
+      this.index = 0;
+    } else {
+      this.queue = this.order.slice();
+      this.index = clamp(index ?? 0, 0, this.queue.length - 1);
+    }
     this.load(true);
   },
 
   load(autoplay) {
     const t = this.queue[this.index]; if (!t) return;
     audio.src = this.album.source === "demo" ? t.uri : `/api/local/stream/${encodeURIComponent(t.id)}`;
+    audio.loop = this.repeat === "one";
     if (autoplay) audio.play().catch(err => { if (err.name !== "AbortError") toast("Tap play to start (" + err.message + ")"); });
     const device = this.album.source === "demo" ? "This screen · preview" : "This screen";
     this.ui({ title: t.title, artist: t.artist || this.album.artist, art: this.album.art, playing: true, device, pos: 0, dur: t.duration });
@@ -830,7 +1023,7 @@ const Player = {
       navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist || this.album.artist, album: this.album.title,
         artwork: this.album.art ? [{ src: new URL(this.album.art, location.href).href, sizes: "800x800", type: "image/jpeg" }] : [] });
     }
-    setGlow(); updatePill(); renderSheetState();
+    setGlow(); updatePill(); renderSheetState(); NP.modes(); NP.queue();
   },
 
   async playSpotify(album, index, shuffle) {
@@ -841,10 +1034,12 @@ const Player = {
     if (shuffle) offset = Math.floor(Math.random() * Math.max(1, album.track_list.length));
     try {
       await api("/api/spotify/play", { method: "POST", body: { uri: album.uri, offset, device_id } });
-      this.sp = { ...(this.sp || {}), album_id: album.id, is_playing: true };
-      this.ui({ title: album.track_list[offset]?.title || album.title, artist: album.artist, art: album.art, playing: true });
+      this.sp = { ...(this.sp || {}), album_id: album.id, is_playing: true, progress_ms: 0 };
+      this.spAt = performance.now();
+      const t = album.track_list[offset];
+      this.ui({ title: t?.title || album.title, artist: album.artist, art: album.art, playing: true, pos: 0, dur: t?.duration || 0 });
       this.startPolling();
-      setGlow(); updatePill();
+      setGlow(); updatePill(); NP.modes(); NP.queue();
     } catch (err) {
       if (/device/i.test(err.message)) openDevices(album, index);
       toast(err.message, 5000);
@@ -855,9 +1050,12 @@ const Player = {
     if (this.mode === "browser") { audio.paused ? audio.play() : audio.pause(); }
     else if (this.mode === "spotify") {
       const action = this.sp?.is_playing ? "pause" : "resume";
-      if (this.sp) this.sp.is_playing = !this.sp.is_playing;
+      if (this.sp) {   // hold the position where it is while paused
+        this.sp.progress_ms = (this.cur.pos || 0) * 1000; this.spAt = performance.now();
+        this.sp.is_playing = !this.sp.is_playing;
+      }
       this.ui({ playing: this.sp?.is_playing }); updatePill();
-      api("/api/spotify/control", { method: "POST", body: { action } }).catch(e => toast(e.message)).finally(() => this.pollSoon());
+      this.spotify(action);
     }
   },
   stop() {
@@ -865,20 +1063,69 @@ const Player = {
     else if (this.mode === "spotify" && this.sp?.is_playing) { this.sp.is_playing = false; api("/api/spotify/control", { method: "POST", body: { action: "pause" } }).catch(() => {}); }
     this.stopPolling();
     this.mode = null; this.album = null; this.sp = null;
+    NP.close();
     $("#player").hidden = true;
     setGlow(); render();
   },
   next() {
-    if (this.mode === "browser") { if (this.index < this.queue.length - 1) { this.index++; this.load(true); } }
-    else if (this.mode === "spotify") api("/api/spotify/control", { method: "POST", body: { action: "next" } }).catch(e => toast(e.message)).finally(() => this.pollSoon());
+    if (this.mode === "browser") {
+      if (this.index < this.queue.length - 1) this.index++;
+      else if (this.repeat === "all") this.index = 0;
+      else return;
+      this.load(true);
+    } else if (this.mode === "spotify") this.spotify("next");
   },
   prev() {
     if (this.mode === "browser") {
-      if (audio.currentTime > 4 || this.index === 0) audio.currentTime = 0; else { this.index--; this.load(true); }
-    } else if (this.mode === "spotify") api("/api/spotify/control", { method: "POST", body: { action: "previous" } }).catch(e => toast(e.message)).finally(() => this.pollSoon());
+      if (audio.currentTime > 4 || (this.index === 0 && this.repeat !== "all")) audio.currentTime = 0;
+      else { this.index = (this.index || this.queue.length) - 1; this.load(true); }
+    } else if (this.mode === "spotify") this.spotify("previous");
+  },
+  jumpTo(i) { if (this.mode === "browser" && this.queue[i]) { this.index = i; this.load(true); } },
+  /* f: how far into the track, 0 to 1 */
+  seek(f) {
+    if (this.mode === "browser" && audio.duration) { audio.currentTime = f * audio.duration; mediaState(); }
+    else if (this.mode === "spotify" && this.cur.dur) {
+      const pos = f * this.cur.dur;
+      if (this.sp) { this.sp.progress_ms = pos * 1000; this.spAt = performance.now(); }
+      this.ui({ pos });
+      this.spotify("seek", Math.round(pos * 1000));
+    }
+  },
+  toggleShuffle() {
+    if (this.mode === "spotify") {
+      const on = !this.sp?.shuffle;
+      if (this.sp) this.sp.shuffle = on;
+      NP.modes();
+      return this.spotify("shuffle", on);
+    }
+    this.shuffle = !this.shuffle; store.set("shuffle", this.shuffle);
+    if (this.mode === "browser") {   // the track playing carries on; what comes after it changes
+      const cur = this.queue[this.index];
+      this.queue = this.shuffle ? [cur, ...shuffled(this.order.filter(t => t !== cur))] : this.order.slice();
+      this.index = Math.max(0, this.queue.indexOf(cur));
+    }
+    NP.modes(); NP.queue();
+  },
+  cycleRepeat() {   // off, then the whole album, then this track
+    const next = { off: "all", all: "one", one: "off" }[this.repeatMode()];
+    if (this.mode === "spotify") {
+      const v = { off: "off", all: "context", one: "track" }[next];
+      if (this.sp) this.sp.repeat = v;
+      NP.modes();
+      return this.spotify("repeat", v);
+    }
+    this.repeat = next; store.set("repeat", next);
+    audio.loop = this.mode === "browser" && next === "one";
+    NP.modes(); NP.queue();
+  },
+  spotify(action, value) {
+    return api("/api/spotify/control", { method: "POST", body: { action, value } }).catch(e => toast(e.message)).finally(() => this.pollSoon());
   },
 
-  ui({ title, artist, art, playing, device, pos, dur }) {
+  ui(o) {
+    for (const k in o) if (o[k] !== undefined) this.cur[k] = o[k];
+    const { title, artist, art, playing, device, pos, dur } = o;
     if ($("#player").hidden) { $("#player").hidden = false; requestAnimationFrame(render); }
     if (title !== undefined) $("#pTitle").textContent = title;
     if (artist !== undefined) $("#pArtist").textContent = artist;
@@ -894,28 +1141,40 @@ const Player = {
       this._pct = pct;
     }
     if (dur !== undefined) this._dur = dur;
+    NP.sync(o);
   },
 
-  startPolling() { this.stopPolling(); this.poll(); this.pollT = setInterval(() => this.poll(), 3000); },
-  stopPolling() { clearInterval(this.pollT); this.pollT = null; },
+  startPolling() {
+    this.stopPolling(); this.poll();
+    this.pollT = setInterval(() => this.poll(), 3000);
+    this.tickT = setInterval(() => this.tick(), 250);
+  },
+  stopPolling() { clearInterval(this.pollT); clearInterval(this.tickT); this.pollT = this.tickT = null; },
   pollSoon() { setTimeout(() => this.poll(), 600); },
+  // Between polls, Spotify's position moves on by the clock, so the bar doesn't stop and start.
+  tick() {
+    const s = this.sp;
+    if (this.mode !== "spotify" || !s?.is_playing || !this.cur.dur || document.hidden) return;
+    this.ui({ pos: Math.min(this.cur.dur, (s.progress_ms || 0) / 1000 + (performance.now() - this.spAt) / 1000) });
+  },
   async poll() {
     if (this.mode !== "spotify" || document.hidden) return;
     try {
       const s = await api("/api/spotify/state");
       if (!s || !s.track) return;
       const changedAlbum = s.album_id !== this.sp?.album_id;
-      this.sp = s;
+      this.sp = s; this.spAt = performance.now();
       this.ui({ title: s.track, artist: s.artist, art: s.image, playing: s.is_playing, device: s.device,
         pos: (s.progress_ms || 0) / 1000, dur: (s.duration_ms || 0) / 1000 });
       if (changedAlbum && S.byId.has(s.album_id)) setOpen(s.album_id);
-      setGlow(); updatePill();
+      setGlow(); updatePill(); NP.modes();
     } catch {}
   },
 };
 
-audio.addEventListener("ended", () => {
-  if (Player.index < Player.queue.length - 1) Player.next();
+audio.addEventListener("ended", () => {   // "repeat this track" loops the audio itself and never ends
+  if (Player.mode !== "browser") return;
+  if (Player.index < Player.queue.length - 1 || Player.repeat === "all") Player.next();
   else { Player.ui({ playing: false }); updatePill(); renderSheetState(); }
 });
 /* Lock screen and notification: the playing state and a position bar you can drag there. */
@@ -934,14 +1193,13 @@ audio.addEventListener("seeked", mediaState);
 audio.addEventListener("timeupdate", () => Player.mode === "browser" && audio.duration && Player.ui({ pos: audio.currentTime, dur: audio.duration }));
 audio.addEventListener("error", () => { if (Player.mode === "browser" && audio.src) { toast("Couldn't play this track in the browser, skipping"); setTimeout(() => Player.next(), 800); } });
 $(".p-progress").addEventListener("click", e => {
-  if (Player.mode !== "browser" || !audio.duration) return;
+  if (!Player.canSeek()) return;
   const r = e.currentTarget.getBoundingClientRect();
-  audio.currentTime = ((e.clientX - r.left) / r.width) * audio.duration;
+  Player.seek(clamp((e.clientX - r.left) / r.width, 0, 1));
 });
 $("#pToggle").onclick = () => Player.toggle();
 $("#pNext").onclick = () => Player.next();
 $("#pPrev").onclick = () => Player.prev();
-$("#pCover").onclick = () => { const id = Player.albumId(); if (id && S.byId.has(id)) { setOpen(id); openSheet(id, $("#pCover")); } };
 $("#pDevice").onclick = () => S.status?.spotify?.connected ? openDevices() : toast("Local music and demo previews play on this screen. Connect Spotify in Settings to pick other speakers.");
 if ("mediaSession" in navigator) {
   const ms = navigator.mediaSession;
@@ -955,6 +1213,180 @@ if ("mediaSession" in navigator) {
   on("seekbackward", d => seekBy(-(d.seekOffset || 10)));
   on("seekforward", d => seekBy(d.seekOffset || 10));
 }
+
+/* ======================================================== now playing
+   The full-screen player. Tap the bar (or swipe it up) to open it; the chevron, a swipe down,
+   Escape or Back put it away. The cover sits in front of its record, which slides out of the
+   sleeve once the screen is up and turns while the music plays. */
+
+const np = $("#nowPlaying"), npBar = $("#npBar");
+const NP = {
+  isOpen: false, seeking: false, f: 0, skipPop: false, outT: 0,
+
+  open() {
+    if (!Player.mode || this.isOpen) return;
+    this.isOpen = true;
+    this.render();
+    reveal(np, true);
+    for (const s of ["#topbar", "#room", "#player"]) $(s).inert = true;   // nothing behind it takes focus
+    clearTimeout(this.outT);
+    this.outT = setTimeout(() => { np.classList.add("out"); this.spin(); }, reduceMotion.matches ? 0 : 220);
+    if (!history.state?.np) history.pushState({ np: 1 }, "");   // so Back closes it
+    $("#npClose").focus({ preventScroll: true });
+  },
+  close(fromHistory = false) {
+    if (!this.isOpen) return;
+    this.isOpen = false;
+    clearTimeout(this.outT);
+    np.classList.remove("dragging");
+    np.style.transform = "";
+    reveal(np, false, 300);
+    for (const s of ["#topbar", "#room", "#player"]) $(s).inert = false;
+    this.outT = setTimeout(() => { np.classList.remove("out"); setSpin($("#npVinyl .label"), false, true); }, 300);
+    if (!fromHistory && history.state?.np) { this.skipPop = true; history.back(); }
+  },
+
+  render() {
+    const c = Player.cur;
+    this.sync({ ...c, art: c.art || "" });
+    this.modes(); this.queue();
+  },
+  sync(o) {
+    if (o.title !== undefined) $("#npTitle").textContent = o.title;
+    if (o.artist !== undefined) $("#npArtist").textContent = o.artist;
+    if (o.art !== undefined) this.cover(o.art);
+    if (o.playing !== undefined) { $("#npToggle").innerHTML = icon(o.playing ? "pause" : "play"); this.spin(); }
+    if (o.device !== undefined) $("#npDeviceName").textContent = o.device || "";
+    if (o.dur !== undefined) $("#npDur").textContent = fmt(o.dur || 0);
+    if (o.pos !== undefined && !this.seeking) this.setPos(o.pos, o.dur ?? Player.cur.dur);
+    if (o.pos !== undefined || o.dur !== undefined) npBar.classList.toggle("fixed", !Player.canSeek());
+  },
+  cover(art) {
+    const a = S.byId.get(Player.albumId()) || Player.album;
+    np.style.setProperty("--np-c", a?.color || "#2a2622");
+    $("#npVinyl .label").style.setProperty("--lc", a?.color || "#3a3632");
+    $("#npFrom").textContent = a?.title || Player.sp?.album || "";
+    for (const img of [$("#npCover"), $("#npLabel")]) {
+      if (art) { if (img.getAttribute("src") !== art) img.src = art; img.style.visibility = ""; }
+      else { img.removeAttribute("src"); img.style.visibility = img.id === "npLabel" ? "hidden" : ""; }
+    }
+  },
+  setPos(pos, dur) {
+    const f = dur ? clamp(pos / dur, 0, 1) : 0;
+    npBar.classList.toggle("jump", f < this.f || f - this.f > 0.05);   // glide forward, snap otherwise
+    npBar.style.setProperty("--f", f.toFixed(4));
+    this.f = f;
+    $("#npPos").textContent = fmt(pos);
+  },
+  spin() { setSpin($("#npVinyl .label"), this.isOpen && np.classList.contains("out") && Player.playing()); },
+  modes() {
+    const sh = $("#npShuffle"), rp = $("#npRepeat"), on = Player.shuffleOn(), rep = Player.repeatMode();
+    sh.classList.toggle("on", on); sh.setAttribute("aria-pressed", on);
+    sh.title = on ? "Shuffle is on" : "Shuffle";
+    rp.classList.toggle("on", rep !== "off"); rp.classList.toggle("one", rep === "one");
+    rp.title = { off: "Repeat", all: "Repeating the album", one: "Repeating this track" }[rep];
+  },
+  queue() {   // Up next: what plays after this track, from this screen's queue
+    if (!this.isOpen) return;
+    const q = Player.queue, i = Player.index;
+    let items = [];
+    if (Player.mode === "browser") {
+      items = q.slice(i + 1).map((t, k) => [t, i + 1 + k]);
+      if (Player.repeat === "all") items = items.concat(q.slice(0, i).map((t, k) => [t, k]));
+    }
+    $("#npNextWrap").hidden = !items.length;
+    $("#npQueue").innerHTML = items.slice(0, 60).map(([t, k]) =>
+      `<li data-i="${k}"><span class="n">${t.track_no || k + 1}</span><span class="tt">${esc(t.title)}</span><span class="d">${fmt(t.duration)}</span></li>`).join("");
+  },
+};
+
+/* the seek bar: drag along it; the track moves when you let go */
+const seekAt = e => { const r = npBar.getBoundingClientRect(); return clamp((e.clientX - r.left) / r.width, 0, 1); };
+function previewSeek(f) {
+  npBar.style.setProperty("--f", f.toFixed(4));
+  $("#npPos").textContent = fmt(f * (Player.cur.dur || 0));
+}
+npBar.addEventListener("pointerdown", e => {
+  if (!Player.canSeek() || e.button > 0) return;
+  e.preventDefault();
+  NP.seeking = true;
+  try { npBar.setPointerCapture(e.pointerId); } catch {}
+  npBar.classList.add("seeking");
+  previewSeek(seekAt(e));
+});
+npBar.addEventListener("pointermove", e => { if (NP.seeking) previewSeek(seekAt(e)); });
+npBar.addEventListener("pointerup", e => {
+  if (!NP.seeking) return;
+  NP.seeking = false; npBar.classList.remove("seeking");
+  NP.f = seekAt(e);
+  Player.seek(NP.f);
+});
+npBar.addEventListener("pointercancel", () => {
+  if (!NP.seeking) return;
+  NP.seeking = false; npBar.classList.remove("seeking");
+  NP.setPos(Player.cur.pos || 0, Player.cur.dur);
+});
+
+/* swipe down to put it away: it follows the finger, then goes or springs back */
+const Pull = { y0: null, x0: 0, dy: 0, on: false, top: true, lastY: 0, lastT: 0, v: 0 };
+np.addEventListener("touchstart", e => {
+  Pull.y0 = null;
+  if (e.touches.length !== 1 || e.target.closest(".np-bar")) return;
+  let top = true;   // only from the top of whatever scrolls; further down, the swipe scrolls instead
+  for (let el = e.target; el && el !== np; el = el.parentElement) if (el.scrollTop > 0) { top = false; break; }
+  const t = e.touches[0];
+  Object.assign(Pull, { y0: t.clientY, x0: t.clientX, dy: 0, on: false, top, lastY: t.clientY, lastT: e.timeStamp, v: 0 });
+}, { passive: true });
+np.addEventListener("touchmove", e => {
+  if (Pull.y0 === null) return;
+  const t = e.touches[0], dy = t.clientY - Pull.y0, dx = t.clientX - Pull.x0;
+  if (!Pull.on) {
+    if (Math.abs(dy) < 8 && Math.abs(dx) < 8) return;
+    if (!Pull.top || dy <= 0 || Math.abs(dx) > dy) { Pull.y0 = null; return; }   // a scroll, or sideways
+    Pull.on = true; np.classList.add("dragging");
+  }
+  e.preventDefault();
+  const dt = e.timeStamp - Pull.lastT;
+  if (dt > 0) Pull.v = 0.7 * ((t.clientY - Pull.lastY) / dt) + 0.3 * Pull.v;
+  Pull.lastY = t.clientY; Pull.lastT = e.timeStamp;
+  Pull.dy = Math.max(0, dy);
+  np.style.transform = `translateY(${Pull.dy}px)`;
+}, { passive: false });
+function endPull() {
+  const was = Pull.on;
+  Pull.y0 = null; Pull.on = false;
+  if (!was) return;
+  np.classList.remove("dragging");
+  np.style.transform = "";
+  if (Pull.dy > Math.min(150, innerHeight * 0.22) || Pull.v > 0.5) NP.close();   // otherwise it springs back up
+}
+np.addEventListener("touchend", endPull);
+np.addEventListener("touchcancel", endPull);
+
+$("#npClose").onclick = () => NP.close();
+$("#npToggle").onclick = () => Player.toggle();
+$("#npNext").onclick = () => Player.next();
+$("#npPrev").onclick = () => Player.prev();
+$("#npShuffle").onclick = () => { haptic(6); Player.toggleShuffle(); };
+$("#npRepeat").onclick = () => { haptic(6); Player.cycleRepeat(); };
+$("#npDevice").onclick = () => $("#pDevice").onclick();
+$("#npTracks").onclick = () => { const id = Player.albumId(); if (id && S.byId.has(id)) openSheet(id, $("#npCover")); };
+$("#npQueue").addEventListener("click", e => { const li = e.target.closest("li"); if (li) Player.jumpTo(+li.dataset.i); });
+addEventListener("popstate", () => {
+  if (NP.skipPop) { NP.skipPop = false; return; }
+  if (!NP.isOpen) return;
+  if ($$(".sheet").some(s => s.classList.contains("in"))) { closeSheets(); history.pushState({ np: 1 }, ""); return; }   // Back closes the top layer first
+  NP.close(true);
+});
+
+/* the bar at the bottom: tap it, or swipe it up, for the full player */
+$("#player").addEventListener("click", e => {
+  peek();
+  if (!e.target.closest("button, .p-progress")) NP.open();
+});
+let barY = null;
+$("#player").addEventListener("touchstart", e => { barY = e.touches.length === 1 && !e.target.closest(".p-progress") ? e.touches[0].clientY : null; }, { passive: true });
+$("#player").addEventListener("touchmove", e => { if (barY !== null && barY - e.touches[0].clientY > 24) { barY = null; NP.open(); } }, { passive: true });
 
 /* ======================================================== Spotify Web Playback SDK (optional) */
 
@@ -1135,7 +1567,7 @@ $("#search").oninput = e => { clearTimeout(searchT); searchT = setTimeout(() => 
 function closeSheets() { $$(".sheet").forEach(s => (s.id === "albumSheet" ? closeAlbum() : reveal(s, false))); }
 document.addEventListener("click", e => { if (e.target.closest("[data-close]")) closeSheets(); });
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") closeSheets();
+  if (e.key === "Escape") { if ($$(".sheet").some(s => s.classList.contains("in"))) closeSheets(); else NP.close(); }
   if (e.key === " " && !e.target.matches("input,select,textarea,button")) { e.preventDefault(); Player.toggle(); }
 });
 
@@ -1162,7 +1594,6 @@ function peek() {
 }
 $("#wallBtn").onclick = () => setWall(!document.body.classList.contains("wallmode"));
 $("#room").addEventListener("click", e => { if (!e.target.closest(".spine")) peek(); });
-$("#player").addEventListener("click", peek);
 document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && document.body.classList.contains("wallmode")) setWall(false); });
 document.addEventListener("visibilitychange", async () => {
   if (!document.hidden) {
@@ -1180,6 +1611,7 @@ new ResizeObserver(() => {
 /* ======================================================== boot */
 
 (async function boot() {
+  if (history.state?.np) history.replaceState(null, "");   // a reload starts with the player put away
   const params = new URLSearchParams(location.search);
   if (params.get("spotify") === "connected") toast("Spotify connected — syncing your albums");
   if (params.get("spotify_error")) toast("Spotify: " + params.get("spotify_error"), 6000);

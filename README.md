@@ -22,8 +22,10 @@ It's one small FastAPI server plus a touch-friendly web app. You can install it 
 - **The display.**
   - The row sits in a gunmetal bezel on a dark wall, shaped like a 28″ stretched-bar screen. **Settings → Display → Shape** switches between that bar, a wider screen, or filling the window.
   - Each spine takes its colour from the cover, and its thickness from the track count. Scroll the row by swiping, dragging with the mouse, or with the mouse wheel.
-  - The playing album stays open on the shelf with a *Now playing* label, and the wall glows faintly in its colour.
-- **Arrange.** By artist, decade, recently added, title, **colour** (a rainbow shelf), or **manual order**: hold a spine, then drag it to a new place. The manual order is saved on the server, so every screen shares it. A jump strip under the display (A–Z or decades) scrolls straight to a section.
+  - The spine under the cursor lifts out of the shelf, its neighbours a little less; on a touch screen, the one under your finger lifts.
+  - The playing album stays open on the shelf with a *Now playing* label. Its record slides out of the sleeve and turns while it plays (tap the record to pause), and the wall glows faintly in its colour.
+- **Now playing.** Tap the player bar, or swipe it up, for the full-screen player: the cover and its spinning record, a seek bar you can drag, shuffle, repeat (the album or one track) and what's up next. Swipe down, press Back or Escape to put it away. Shuffle, repeat and seeking work for Spotify too.
+- **Arrange.** By artist, decade, recently added, title, **colour** (a rainbow shelf), or **manual order**: hold a spine, then drag it to a new place. The manual order is saved on the server, so every screen shares it. A jump strip under the display (A–Z or decades) scrolls straight to a section; on a phone it's a rail down the side, and in orders without letters it becomes a handle you drag.
 - You can search, and hide albums.
 - **Wall mode** (⤢). The app goes fullscreen, keeps the screen awake, and hides the bars until you tap. On a stretched-bar screen the row fills it; on a tablet the bar is letterboxed unless the shape is set to *Fill the window*.
 - **Sign-in is always required** (see below). Every screen stays signed in for a year, or until you choose **Settings → Sign out** or change the password.
@@ -176,7 +178,8 @@ Every `/api/` call needs the sign-in cookie (`POST /login` with `password`).
 | POST | `/api/demo/load` | load the demo shelf (`DELETE /api/demo` removes it) |
 | POST | `/api/library/rescan` | rescan the folder (`?force_art=true` to re-find artwork) |
 | GET | `/api/local/stream/{track_id}` | audio stream (supports Range) |
-| POST | `/api/spotify/sync` / `add` / `play` / `control` / `transfer` | Spotify |
+| POST | `/api/spotify/sync` / `add` / `play` / `transfer` | Spotify |
+| POST | `/api/spotify/control` | `{"action": "pause" \| "resume" \| "next" \| "previous" \| "seek" \| "shuffle" \| "repeat", "value": ...}` (seek: ms; shuffle: true/false; repeat: off, context or track) |
 | GET | `/api/status` | scan / sync progress |
 | GET | `/healthz` | health check (no sign-in) |
 

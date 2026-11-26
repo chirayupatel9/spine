@@ -481,7 +481,7 @@ def spotify_play(body: dict = Body(...)):
 
 @app.post("/api/spotify/control")
 def spotify_control(body: dict = Body(...)):
-    _sp(spotify.control, body.get("action"), body.get("device_id"))
+    _sp(spotify.control, body.get("action"), body.get("device_id"), body.get("value"))
     return {"ok": True}
 
 

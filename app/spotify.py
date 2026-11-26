@@ -277,6 +277,7 @@ def state() -> dict | None:
         "device": (s.get("device") or {}).get("name"),
         "device_id": (s.get("device") or {}).get("id"),
         "shuffle": s.get("shuffle_state"),
+        "repeat": s.get("repeat_state"),
     }
 
 
@@ -300,16 +301,30 @@ def play(context_uri: str | None = None, offset: int | None = None, device_id: s
             raise
 
 
-def control(action: str, device_id: str | None = None) -> None:
-    q = f"?device_id={device_id}" if device_id else ""
+def control(action: str, device_id: str | None = None, value=None) -> None:
+    """Pause, resume, skip, seek (value = position in ms), shuffle (value = on/off) or
+    repeat (value = off, context or track)."""
+    q = {"device_id": device_id} if device_id else {}
     if action == "pause":
-        api("PUT", "/me/player/pause" + q)
+        api("PUT", "/me/player/pause", params=q)
     elif action == "resume":
-        api("PUT", "/me/player/play" + q)
+        api("PUT", "/me/player/play", params=q)
     elif action == "next":
-        api("POST", "/me/player/next" + q)
+        api("POST", "/me/player/next", params=q)
     elif action == "previous":
-        api("POST", "/me/player/previous" + q)
+        api("POST", "/me/player/previous", params=q)
+    elif action == "seek":
+        try:
+            ms = max(0, int(float(value)))
+        except (TypeError, ValueError):
+            raise SpotifyError(400, "seek needs a position in milliseconds") from None
+        api("PUT", "/me/player/seek", params={**q, "position_ms": ms})
+    elif action == "shuffle":
+        api("PUT", "/me/player/shuffle", params={**q, "state": "true" if value else "false"})
+    elif action == "repeat":
+        if value not in ("off", "context", "track"):
+            raise SpotifyError(400, "repeat is off, context or track")
+        api("PUT", "/me/player/repeat", params={**q, "state": value})
     else:
         raise SpotifyError(400, f"Unknown action {action}")
 

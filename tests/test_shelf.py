@@ -75,3 +75,17 @@ def test_status(signed_in):
     st = signed_in.get("/api/status").json()
     assert st["spotify"]["configured"] is False
     assert st["spotify"]["redirect_uri"] == "http://127.0.0.1:8000/auth/spotify/callback"
+
+
+def test_spotify_player_controls(signed_in, monkeypatch):
+    """Seek, shuffle and repeat go to Spotify's player API; bad values are refused before that."""
+    from app import spotify
+    calls = []
+    monkeypatch.setattr(spotify, "api", lambda method, path, **kw: calls.append((method, path, kw.get("params"))))
+    for action, value in (("pause", None), ("seek", 61500.7), ("shuffle", True), ("repeat", "track")):
+        assert signed_in.post("/api/spotify/control", json={"action": action, "value": value}).status_code == 200
+    assert calls == [("PUT", "/me/player/pause", {}), ("PUT", "/me/player/seek", {"position_ms": 61500}),
+                     ("PUT", "/me/player/shuffle", {"state": "true"}), ("PUT", "/me/player/repeat", {"state": "track"})]
+    assert signed_in.post("/api/spotify/control", json={"action": "repeat", "value": "sometimes"}).status_code == 400
+    assert signed_in.post("/api/spotify/control", json={"action": "seek", "value": "soon"}).status_code == 400
+    assert len(calls) == 4
