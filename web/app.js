@@ -37,14 +37,79 @@ async function api(path, opts = {}) {
 
 let toastTimer;
 function toast(msg, ms = 3200) {
-  const t = $("#toast"); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms);
+  const t = $("#toast"); t.textContent = msg; reveal(t, true);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => reveal(t, false), ms);
 }
 const fmt = s => { if (!s && s !== 0) return ""; s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const icon = name => `<svg><use href="#i-${name}"/></svg>`;
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
+
+/* ======================================================== motion
+   The curves and the album-opening duration live in style.css. Scripted motion (scrolling the row,
+   the cover flying into the album sheet, neighbours sliding while arranging) reads them from there,
+   so it moves in step with the CSS. */
+
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const cssVal = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const cssMs = name => parseFloat(cssVal(name)) || 0;
+
+function bezier(x1, y1, x2, y2) {   // CSS cubic-bezier() as a function of progress 0..1
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const X = t => ((ax * t + bx) * t + cx) * t, Y = t => ((ay * t + by) * t + cy) * t;
+  const dX = t => (3 * ax * t + 2 * bx) * t + cx;
+  return x => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    let t = x;
+    for (let i = 0; i < 8; i++) {   // Newton, then bisection if it stalls
+      const e = X(t) - x;
+      if (Math.abs(e) < 1e-5) return Y(t);
+      const d = dX(t);
+      if (Math.abs(d) < 1e-6) break;
+      t -= e / d;
+    }
+    let lo = 0, hi = 1; t = x;
+    while (hi - lo > 1e-5) { if (X(t) < x) lo = t; else hi = t; t = (lo + hi) / 2; }
+    return Y(t);
+  };
+}
+const easeCache = new Map();
+function cssEase(name) {
+  const v = cssVal(name);
+  if (!easeCache.has(v)) easeCache.set(v, bezier(...(v.match(/-?[\d.]+/g) || [0, 0, 1, 1]).map(Number)));
+  return easeCache.get(v);
+}
+
+/* Show or hide an element that starts [hidden], animated by CSS transitions keyed on .in.
+   Interruptible: showing it again while it is leaving reverses from wherever it is. */
+function reveal(el, show, exitMs = 160) {
+  clearTimeout(el._hideT);
+  if (show) {
+    if (el.hidden) { el.hidden = false; void el.offsetWidth; }
+    el.classList.add("in");
+  } else if (!el.hidden) {
+    el.classList.remove("in");
+    el._hideT = setTimeout(() => (el.hidden = true), reduceMotion.matches ? 0 : exitMs);
+  }
+}
+
+/* FLIP: run `mutate` (which moves elements in the layout), then slide each of `els` from where it
+   was to where it now is. Uses `translate`, so a `transform` set by CSS (the lifted spine) is kept. */
+function flip(els, mutate, ms = 200) {
+  if (reduceMotion.matches) return mutate();
+  const before = els.map(el => el.getBoundingClientRect().left);
+  mutate();
+  for (const el of els) for (const an of el.getAnimations()) if (an.id === "flip") an.cancel();
+  const after = els.map(el => el.getBoundingClientRect().left);
+  const easing = cssVal("--ease-out");
+  els.forEach((el, i) => {
+    const dx = before[i] - after[i];
+    if (Math.abs(dx) > 0.5) el.animate([{ translate: `${dx}px 0` }, { translate: "0 0" }], { duration: ms, easing, id: "flip" });
+  });
+}
 
 /* ======================================================== arranging */
 
@@ -149,8 +214,11 @@ function render() {
   row.classList.add("instant");
   row.innerHTML = "";
   const frag = document.createDocumentFragment();
+  const fresh = S.fresh; S.fresh = null;   // albums that just arrived from a sync, scan or demo load
+  let k = 0;
   for (const a of list) {
     const el = makeSpine(a);
+    if (fresh?.has(a.id)) { el.classList.add("arrive"); el.style.setProperty("--d", Math.min(k++ * 18, 360) + "ms"); }
     if (a.id === S.openId) { el.classList.add("open"); addCover(el, a); }
     S.els.set(a.id, el);
     frag.appendChild(el);
@@ -177,7 +245,10 @@ function renderIndex() {
   for (const [k, id] of firsts) {
     const b = document.createElement("button");
     b.textContent = k; b.dataset.key = k;
-    b.onclick = () => { const el = S.els.get(id); if (el) scrollRowTo(el.offsetLeft - 1, true); };
+    b.onclick = () => {
+      const el = S.els.get(id), row = $("#row");
+      if (el) scrollRowTo(clamp(el.offsetLeft - 1, 0, row.scrollWidth - row.clientWidth), true);
+    };
     nav.appendChild(b);
   }
   markIndex();
@@ -238,21 +309,29 @@ function centerOn(id, animate) {
   }
   if (target === null) return;
   const left = clamp(target - row.clientWidth / 2, 0, Math.max(0, x - row.clientWidth));
-  scrollRowTo(left, animate);
+  // Same duration and curve as the CSS width transition: every spine's width moves by the same
+  // fraction each frame, so the album travels smoothly to the middle instead of drifting past it.
+  scrollRowTo(left, animate, { dur: cssMs("--open-dur"), ease: cssEase("--ease-open") });
 }
 
-let scrollAnim = 0;
-function stopScrollAnim() { cancelAnimationFrame(scrollAnim); scrollAnim = 0; }
-function scrollRowTo(left, animate) {
+let scrollAnim = 0, scrollTarget = null;
+function stopScrollAnim() { cancelAnimationFrame(scrollAnim); scrollAnim = 0; scrollTarget = null; }
+function scrollRowTo(left, animate, { dur, ease } = {}) {
   const row = $("#row");
   stopScrollAnim();
-  if (!animate) { row.scrollLeft = left; return; }
-  const from = row.scrollLeft, t0 = performance.now(), dur = 620;
-  const ease = t => 1 - Math.pow(1 - t, 3);
+  const from = row.scrollLeft, dist = Math.abs(left - from);
+  if (!animate || reduceMotion.matches || dur === 0) { row.scrollLeft = left; return; }
+  if (dist < 1) return;
+  dur ??= clamp(220 + Math.sqrt(dist) * 9, 240, 640);   // longer trips take a little longer, never sluggish
+  ease ??= cssEase("--ease-out");
+  scrollTarget = left;
+  let t0 = null;
   const step = now => {
+    t0 ??= now;   // start on the same frame as the CSS transitions
     const t = Math.min(1, (now - t0) / dur);
     row.scrollLeft = from + (left - from) * ease(t);
-    scrollAnim = t < 1 ? requestAnimationFrame(step) : 0;
+    if (t < 1) scrollAnim = requestAnimationFrame(step);
+    else { scrollAnim = 0; scrollTarget = null; }
   };
   scrollAnim = requestAnimationFrame(step);
 }
@@ -278,6 +357,7 @@ function setGlow() {
 
 async function loadAlbums() {
   const list = await api(`/api/albums?include_hidden=${store.get("showHidden", false)}`);
+  if (S.loaded) S.fresh = new Set(list.filter(a => !S.byId.has(a.id)).map(a => a.id));
   S.albums = list;
   S.byId = new Map(list.map(a => [a.id, a]));
   S.loaded = true;
@@ -303,7 +383,7 @@ row.addEventListener("click", e => {
   const el = e.target.closest(".spine");
   if (!el) return;
   const id = el.dataset.id;
-  if (id === S.openId) openSheet(id);
+  if (id === S.openId) openSheet(id, el.querySelector(".cover"));
   else tapToPlay(id);
 });
 
@@ -370,7 +450,10 @@ row.addEventListener("contextmenu", e => { if (S.sort === "manual") e.preventDef
 row.addEventListener("keydown", e => {
   if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
     e.preventDefault();
-    scrollRowTo(row.scrollLeft + (e.key === "ArrowRight" ? 1 : -1) * row.clientWidth * 0.4, true);
+    // Held or repeated keys add up from where the last press was heading, and stay quick.
+    const base = scrollTarget ?? row.scrollLeft;
+    const to = clamp(base + (e.key === "ArrowRight" ? 1 : -1) * row.clientWidth * 0.4, 0, row.scrollWidth - row.clientWidth);
+    scrollRowTo(to, true, { dur: 220 });
   }
 });
 
@@ -403,10 +486,14 @@ const Arrange = {
     return true;
   },
   place() {
-    const kids = [...row.children].filter(k => k !== this.el);
+    const all = [...row.children], kids = all.filter(k => k !== this.el);
     let before = null;
     for (const k of kids) { const r = k.getBoundingClientRect(); if (this.x < r.left + r.width / 2) { before = k; break; } }
-    if (before ? this.el.nextElementSibling !== before : row.lastElementChild !== this.el) row.insertBefore(this.el, before);
+    if (before ? this.el.nextElementSibling === before : row.lastElementChild === this.el) return;
+    // Only the spines between the old and new slot move: slide them aside rather than jump.
+    const i = all.indexOf(this.el), j = before ? all.indexOf(before) : all.length;
+    const moved = i < j ? all.slice(i, j) : all.slice(j, i + 1);
+    flip(moved, () => row.insertBefore(this.el, before), 180);
   },
   edge() { // scroll while the picked spine is held near either end
     if (!this.picked) return;
@@ -449,7 +536,45 @@ async function saveOrder() {
 
 /* ======================================================== album details */
 
-async function openSheet(id) {
+/* The cover image flying between the shelf (or the mini player) and the album sheet. */
+let flight = null;
+function cancelFlight() {
+  if (!flight) return;
+  flight.anim.cancel(); flight.img.remove();
+  if (flight.hide) flight.hide.style.visibility = "";
+  flight = null;
+}
+function fly(src, from, to, { dur, easing, hide }) {
+  cancelFlight();
+  const img = new Image();
+  img.className = "flyer"; img.alt = ""; img.src = src;
+  Object.assign(img.style, { left: to.left + "px", top: to.top + "px", width: to.width + "px", height: to.height + "px" });
+  document.body.appendChild(img);
+  const scale = from.width / to.width;
+  const anim = img.animate([
+    { transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${scale})` },
+    { transform: "none" },
+  ], { duration: dur, easing, fill: "forwards" });
+  if (hide) hide.style.visibility = "hidden";   // the source lifts off rather than being copied
+  const f = flight = { img, anim, hide };
+  return anim.finished.then(() => true, () => false).then(ok => {
+    if (flight === f) { img.remove(); if (hide) hide.style.visibility = ""; flight = null; }
+    return ok;
+  });
+}
+/* A cover worth flying from or to: square, fully on screen, and not clipped by the display. */
+function flyRect(el) {
+  if (!el?.isConnected || reduceMotion.matches) return null;
+  const spine = el.closest(".spine");
+  if (spine && !spine.classList.contains("open")) return null;
+  const r = el.getBoundingClientRect();
+  const box = el.closest("#screen")?.getBoundingClientRect() ?? { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+  const inside = r.left >= box.left - 1 && r.right <= box.right + 1 && r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+  return r.width > 8 && Math.abs(r.width - r.height) < 2 && inside ? r : null;
+}
+
+let sheetFrom = null;   // the cover the album sheet opened from
+async function openSheet(id, fromEl) {
   let a;
   try { a = await detail(id); } catch (err) { return toast(err.message); }
   S.sheet = a;
@@ -463,7 +588,34 @@ async function openSheet(id) {
   $("#aFixArt").hidden = a.source !== "local";
   $("#aMenu").hidden = true; $("#artForm").hidden = true;
   renderSheetState();
-  $("#albumSheet").hidden = false;
+  const sheet = $("#albumSheet");
+  const from = a.art ? flyRect(fromEl) : null;
+  sheetFrom = fromEl || null;
+  cancelFlight();
+  sheet.classList.toggle("flying", !!from);
+  reveal(sheet, true);
+  if (!from) return;
+  const landed = await fly(a.art, from, $("#aCover").getBoundingClientRect(),
+    { dur: cssMs("--open-dur") * 0.9, easing: cssVal("--ease-open"), hide: fromEl });
+  if (landed && sheet.classList.contains("in")) sheet.classList.remove("flying");
+}
+
+/* Close the album sheet, flying the cover back to where it came from if that is still on screen. */
+function closeAlbum() {
+  const sheet = $("#albumSheet");
+  if (sheet.hidden || !sheet.classList.contains("in")) return;
+  const a = S.sheet;
+  const back = sheetFrom?.isConnected ? sheetFrom : S.els.get(a?.id)?.querySelector(".cover");
+  const to = a?.art ? flyRect(back) : null;
+  if (to) {
+    const start = (flight ? flight.img : $("#aCover")).getBoundingClientRect();   // mid-flight: turn around
+    sheet.classList.add("flying");
+    fly(a.art, start, to, { dur: 300, easing: cssVal("--ease-out"), hide: back });
+  } else {
+    cancelFlight();
+    sheet.classList.remove("flying");
+  }
+  reveal(sheet, false);
 }
 
 function renderSheetState() {
@@ -493,8 +645,8 @@ $("#aPlay").onclick = () => {
 $("#aShuffle").onclick = () => { setOpen(S.sheet.id); Player.playAlbum(S.sheet, 0, true).then(renderSheetState); };
 $("#aPutBack").onclick = () => {
   if (Player.albumId() === S.sheet.id) Player.stop();
+  setOpen(null);   // first, so the cover doesn't fly back onto a closing spine
   closeSheets();
-  setOpen(null);
 };
 $("#aMore").onclick = () => ($("#aMenu").hidden = !$("#aMenu").hidden);
 $("#aHide").onclick = async () => {
@@ -628,8 +780,10 @@ const Player = {
     if (dur !== undefined) $("#pDur").textContent = fmt(dur || 0);
     if (pos !== undefined) {
       $("#pPos").textContent = fmt(pos);
-      const d = dur ?? this._dur ?? 0;
-      $("#pBar").style.width = d ? Math.min(100, (pos / d) * 100) + "%" : "0";
+      const d = dur ?? this._dur ?? 0, pct = d ? Math.min(100, (pos / d) * 100) : 0, bar = $("#pBar");
+      bar.classList.toggle("jump", pct < (this._pct ?? 0) || pct - (this._pct ?? 0) > 6);   // glide forward, snap otherwise
+      bar.style.width = pct + "%";
+      this._pct = pct;
     }
     if (dur !== undefined) this._dur = dur;
   },
@@ -668,7 +822,7 @@ $(".p-progress").addEventListener("click", e => {
 $("#pToggle").onclick = () => Player.toggle();
 $("#pNext").onclick = () => Player.next();
 $("#pPrev").onclick = () => Player.prev();
-$("#pCover").onclick = () => { const id = Player.albumId(); if (id && S.byId.has(id)) { setOpen(id); openSheet(id); } };
+$("#pCover").onclick = () => { const id = Player.albumId(); if (id && S.byId.has(id)) { setOpen(id); openSheet(id, $("#pCover")); } };
 $("#pDevice").onclick = () => S.status?.spotify?.connected ? openDevices() : toast("Local music and demo previews play on this screen. Connect Spotify in Settings to pick other speakers.");
 if ("mediaSession" in navigator) {
   navigator.mediaSession.setActionHandler("play", () => Player.toggle());
@@ -715,7 +869,7 @@ const Sdk = {
 };
 
 async function openDevices(retryAlbum, retryIndex) {
-  $("#deviceSheet").hidden = false;
+  reveal($("#deviceSheet"), true);
   const list = $("#deviceList");
   list.innerHTML = '<div class="hint">Loading…</div>';
   let devs = [];
@@ -732,7 +886,7 @@ async function openDevices(retryAlbum, retryIndex) {
     b.innerHTML = `<span>${esc(d.name)}</span><span class="hint">${esc(d.type)}${d.active ? " · active" : ""}</span>`;
     b.onclick = async () => {
       store.set("device", d.id);
-      $("#deviceSheet").hidden = true;
+      reveal($("#deviceSheet"), false);
       if (retryAlbum) return Player.playSpotify(retryAlbum, retryIndex || 0);
       if (Player.mode === "spotify") {
         const id = d.id === "sdk" ? await Sdk.load() : d.id;
@@ -748,7 +902,7 @@ $("#devRefresh").onclick = () => openDevices();
 /* ======================================================== settings + status */
 
 function openSettings() {
-  $("#settingsSheet").hidden = false;
+  reveal($("#settingsSheet"), true);
   $("#showHidden").checked = store.get("showHidden", false);
   $("#spineNames").checked = store.get("spineNames", true);
   $("#glowToggle").checked = store.get("glow", true);
@@ -797,7 +951,7 @@ function renderStatus(st) {
 
   const busy = lib.scanning || sp.syncing || demo.loading;
   const t = $("#scanToast");
-  t.hidden = !busy;
+  reveal(t, busy);
   if (busy) t.textContent = demo.loading ? `Demo shelf: ${demo.albums} of ${demo.total} albums` :
     lib.scanning ? `Library: ${lib.phase}${lib.art_total ? ` ${lib.art_done}/${lib.art_total}` : ""}` : `Spotify: syncing ${sp.albums} albums`;
 }
@@ -851,7 +1005,7 @@ $("#sort").onchange = e => { S.sort = e.target.value; store.set("sort", S.sort);
 let searchT;
 $("#search").oninput = e => { clearTimeout(searchT); searchT = setTimeout(() => { S.search = e.target.value; render(); }, 120); };
 
-function closeSheets() { $$(".sheet").forEach(s => (s.hidden = true)); }
+function closeSheets() { $$(".sheet").forEach(s => (s.id === "albumSheet" ? closeAlbum() : reveal(s, false))); }
 document.addEventListener("click", e => { if (e.target.closest("[data-close]")) closeSheets(); });
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeSheets();

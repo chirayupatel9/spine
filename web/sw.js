@@ -1,5 +1,5 @@
 // Minimal service worker: makes Spine installable and keeps the app shell available offline.
-const CACHE = "spine-shell-v2";
+const CACHE = "spine-shell-v3";
 const SHELL = ["/", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png"];
 
 self.addEventListener("install", e => {
