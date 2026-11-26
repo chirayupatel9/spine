@@ -144,3 +144,10 @@ def test_data_from_before_the_rename_is_kept():
     _config_in(d, APP_PASSWORD="x" * 12)
     assert (d / "albumviewer.db").read_bytes() == b"old database"
     assert not (d / "spine.db").exists()
+
+
+def test_the_privacy_page_is_public(client):
+    """Google's sign-in screen and the Play Store link to it, so it opens without signing in."""
+    r = client.get("/privacy")
+    assert r.status_code == 200 and "Limited Use" in r.text and "uploads nothing" in r.text
+    assert "href=/privacy" in client.get("/login").text

@@ -82,7 +82,7 @@ OPEN_PATHS = frozenset({
     "/login", "/healthz", "/manifest.webmanifest", "/.well-known/assetlinks.json",
     "/icon.svg", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png",
     "/auth/google/login", "/auth/google/callback", "/auth/spotify/login", "/auth/spotify/callback", "/auth/app/exchange",
-    "/auth/spotify/start",
+    "/auth/spotify/start", "/privacy",
 })
 # Caching. Cloudflare (or any shared cache) must never keep anything behind sign-in, nor a sign-in
 # redirect: a cached redirect for /app.js would break the app for everyone. Signed-in responses are
@@ -204,9 +204,44 @@ button{background:#f04f23;color:#fff}
 .spotify{background:#1ed760;color:#000}
 svg{width:18px;height:18px;flex:none}
 .err{color:#ff8a6b;margin:0;font-size:14px;line-height:1.45}
-.or{color:rgba(255,255,255,.35);font-size:12px;text-align:center;letter-spacing:.12em}</style></head><body>
-<main><h1>ALBUM VIEWER</h1><p class=sub>Your albums as a row of spines on the wall.</p>{err}{buttons}</main>
+.or{color:rgba(255,255,255,.35);font-size:12px;text-align:center;letter-spacing:.12em}
+.foot{margin:10px 0 0;text-align:center;font-size:12.5px}.foot a{display:inline;padding:0;font-weight:400;color:rgba(255,255,255,.4)}</style></head><body>
+<main><h1>ALBUM VIEWER</h1><p class=sub>Your albums as a row of spines on the wall.</p>{err}{buttons}<p class=foot><a href=/privacy>Privacy</a></p></main>
 </body></html>"""
+
+# What the app keeps about the people who sign in, and why. Public (Google's sign-in screen and the
+# Play Store link here).
+PRIVACY_HTML = """<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Privacy · Album Viewer</title><link rel=icon href=/icon.svg type=image/svg+xml><style>
+body{margin:0;background:#0c0a08;color:rgba(255,255,255,.88);font:16px/1.6 Inter,system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:48px 24px 64px}
+h1{font-size:15px;font-weight:700;letter-spacing:.16em;margin:0 0 4px}
+h2{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.5);margin:32px 0 8px}
+p,li{color:rgba(255,255,255,.78)}ul{padding-left:20px}a{color:#f04f23}.date{color:rgba(255,255,255,.4);font-size:14px}</style></head><body><main>
+<h1>ALBUM VIEWER</h1><p class=date>Privacy · last updated 27 November 2026</p>
+<p>Album Viewer is a personal music shelf that one person runs on their own server. It isn't a company,
+and it has no ads, analytics or trackers.</p>
+<h2>What it keeps, and why</h2>
+<ul>
+<li><b>If you sign in with Google:</b> your name, email address and profile picture, to know who you are and
+show your account. Album Viewer never sees your Google password, and asks Google for nothing else.</li>
+<li><b>If you connect Spotify:</b> your Spotify profile and a sign-in token from Spotify, to put your saved albums
+and playlists on your shelf, and to play, pause and skip on your Spotify devices when you ask it to.</li>
+<li><b>Your shelf:</b> the order you arrange it in and the albums you hide.</li>
+<li><b>Music on your computer or phone</b> stays there: the app reads it on your device and uploads nothing.</li>
+</ul>
+<h2>Where it's kept</h2>
+<p>In a database on the server that runs Album Viewer. It isn't sold, shared or used for anything else.
+One cookie keeps you signed in.</p>
+<h2>Removing it</h2>
+<p>Disconnecting Spotify in Settings deletes its token and takes your Spotify albums off your shelf. To delete
+your account, ask the person who runs this server: their address is on Google's sign-in screen.</p>
+<h2>Google</h2>
+<p>Album Viewer's use and transfer of information received from Google APIs adheres to the
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+including the Limited Use requirements.</p>
+<p><a href=/>Back to Album Viewer</a></p>
+</main></body></html>"""
 G_ICON = ('<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z"/>'
           '<path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.2v3.1A12 12 0 0 0 12 24z"/>'
           '<path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.2a12 12 0 0 0 0 10.8z"/>'
@@ -233,6 +268,11 @@ def _login_page(err: str = "") -> str:
 @app.get("/login", include_in_schema=False)
 def login_page(error: str | None = None):
     return HTMLResponse(_login_page((error or "")[:300]))
+
+
+@app.get("/privacy", include_in_schema=False)
+def privacy_page():
+    return HTMLResponse(PRIVACY_HTML)
 
 
 @app.post("/login", include_in_schema=False)
