@@ -44,6 +44,7 @@ data class Album(
     @SerialName("added_at") val addedAt: Double? = null,
     val tracks: Int? = null,
     val pos: Int? = null,
+    @SerialName("open_url") val openUrl: String? = null,   // YouTube: where it plays in YouTube Music
 )
 
 @Serializable
@@ -54,7 +55,8 @@ data class Track(
     @SerialName("track_no") val trackNo: Int? = null,
     @SerialName("disc_no") val discNo: Int? = null,
     val duration: Double? = null,
-    val uri: String? = null,
+    val uri: String? = null,                  // YouTube: the video's id
+    val embeddable: Boolean = true,           // YouTube: false if it plays only on YouTube itself
 )
 
 @Serializable
@@ -72,11 +74,15 @@ data class AlbumDetail(
     @SerialName("text_color") val textColor: String = "#f4f1ea",
     val art: String? = null,
     @SerialName("track_list") val trackList: List<Track> = emptyList(),
+    @SerialName("open_url") val openUrl: String? = null,
 )
 
 @Serializable data class DemoStatus(val loading: Boolean = false, val albums: Int = 0, val total: Int = 0, val error: String? = null)
 @Serializable data class SpotifyStatus(val configured: Boolean = false, val connected: Boolean = false, val syncing: Boolean = false)
-@Serializable data class Status(val admin: Boolean = false, val demo: DemoStatus = DemoStatus(), val spotify: SpotifyStatus = SpotifyStatus())
+@Serializable data class YouTubeStatus(val configured: Boolean = false, val connected: Boolean = false, val syncing: Boolean = false,
+                                       val channel: String? = null, val error: String? = null)
+@Serializable data class Status(val admin: Boolean = false, val demo: DemoStatus = DemoStatus(), val spotify: SpotifyStatus = SpotifyStatus(),
+                                val youtube: YouTubeStatus = YouTubeStatus())
 
 /** Who is signed in. */
 @Serializable
@@ -89,6 +95,7 @@ data class Me(
     val google: Boolean = false,
     @SerialName("spotify_id") val spotifyId: String? = null,
     val spotify: SpotifyStatus = SpotifyStatus(),
+    val youtube: YouTubeStatus = YouTubeStatus(),
 )
 
 @Serializable data class Order(val ids: List<String> = emptyList())
@@ -243,6 +250,13 @@ class Api(context: Context) {
         val req = Request.Builder().url(url("/api/spotify/connect-link")).post("{}".toRequestBody("application/json".toMediaType())).build()
         client.newCall(req).execute().use { r -> check(r); json.decodeFromString<Link>(r.body?.string().orEmpty()).url }
     }
+    /** The same for YouTube: a one-time address that connects it in a browser tab. */
+    suspend fun youtubeConnectLink(): String = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(url("/api/youtube/connect-link")).post("{}".toRequestBody("application/json".toMediaType())).build()
+        client.newCall(req).execute().use { r -> check(r); json.decodeFromString<Link>(r.body?.string().orEmpty()).url }
+    }
+    /** Give back the YouTube access and take YouTube's albums off the shelf. */
+    suspend fun youtubeDisconnect() = post("/api/youtube/disconnect")
     suspend fun loadDemo() = post("/api/demo/load")
     /** Play on one speaker (`deviceId`), or wherever Spotify is playing when it's null. */
     suspend fun spotifyPlay(uri: String?, offset: Int, deviceId: String? = null) =

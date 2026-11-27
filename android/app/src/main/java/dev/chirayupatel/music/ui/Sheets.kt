@@ -1,5 +1,6 @@
 package dev.chirayupatel.music.ui
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -26,6 +27,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +69,10 @@ fun AlbumSheet(vm: AppViewModel) {
                     )
                     Text(
                         when {
+                            a.source == "youtube" && a.id.startsWith("yl_") -> "LIKED MUSIC · YOUTUBE"
+                            a.source == "youtube" && a.id.startsWith("yv_") -> "YOUTUBE"
+                            a.source == "youtube" && a.kind == "playlist" -> "YOUTUBE PLAYLIST"
+                            a.source == "youtube" -> "YOUTUBE MUSIC ALBUM"
                             a.kind == "playlist" -> "SPOTIFY PLAYLIST"
                             a.source == "spotify" -> "SPOTIFY"
                             a.source == "demo" -> "DEMO SHELF · 30-SECOND PREVIEWS"
@@ -83,6 +92,10 @@ fun AlbumSheet(vm: AppViewModel) {
                         GhostButton("Shuffle") { vm.openId = a.id; vm.play(a.id, shuffle = true) }
                         if (vm.openId == a.id) GhostButton("Put back") { vm.putBack() }
                     }
+                    if (a.source == "youtube") Text(
+                        "Plays in the YouTube Music app, as your YouTube account.",
+                        color = Palette.Faint, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp),
+                    )
                     HorizontalDivider(color = Palette.Line, modifier = Modifier.padding(top = 20.dp))
                     if (a.kind == "playlist" && !a.tracksShared) Text(
                         "Spotify shares the tracks of a playlist only with its owner and collaborators. Press Play to hear it.",
@@ -156,6 +169,30 @@ fun SettingsSheet(vm: AppViewModel) {
                         "developer dashboard. While the app is in Spotify's development mode, that's up to 5 people.",
                     color = Palette.Faint, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp),
                 )
+            }
+            val yt = vm.status?.youtube ?: me?.youtube
+            if (yt?.configured == true) Section("YouTube") {
+                var sure by remember { mutableStateOf(false) }
+                val mine = vm.albums.count { it.source == "youtube" }
+                Text(
+                    when {
+                        yt.syncing -> "Bringing in your playlists…"
+                        !yt.connected -> "Not connected. Your YouTube playlists, including the ones you made in YouTube Music, and your liked " +
+                            "music come onto your shelf, and play in the YouTube Music app."
+                        else -> "Connected" + (yt.channel?.ifBlank { null }?.let { " as $it" } ?: "") + " · $mine on your shelf. They play in the YouTube Music app."
+                    },
+                    color = Palette.Muted, fontSize = 14.sp,
+                )
+                if (!yt.connected) {
+                    GhostButton("Connect YouTube", Modifier.padding(top = 10.dp)) { vm.connectYouTube { openInBrowser(context, it) } }
+                    Text(   // until Google has checked Album Viewer's request to read YouTube
+                        "Google will say it hasn't checked Album Viewer yet. Choose Advanced, then Go to ${Uri.parse(vm.server).host}. " +
+                            "Album Viewer only reads your YouTube, never changes it.",
+                        color = Palette.Faint, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp),
+                    )
+                } else GhostButton(if (sure) "Disconnect YouTube?" else "Disconnect", Modifier.padding(top = 10.dp)) {
+                    if (sure) vm.disconnectYouTube() else sure = true   // a second tap, so a stray one doesn't empty the shelf
+                }
             }
             Section("Music on this phone") {
                 Text(

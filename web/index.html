@@ -30,6 +30,7 @@
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="19" cy="12" r="1.7" fill="currentColor"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 14.5l6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4.5 10.5V9.5a3 3 0 0 1 3-3h11M15.5 3.5l3 3-3 3M19.5 13.5v1a3 3 0 0 1-3 3h-11M8.5 20.5l-3-3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <!-- speakers: where the music plays -->
@@ -45,6 +46,7 @@
     <nav class="seg" id="sourceSeg" aria-label="Source">
       <button data-source="all" class="on">All</button>
       <button data-source="spotify">Spotify</button>
+      <button data-source="youtube" hidden>YouTube</button>
       <button data-source="playlist" hidden>Playlists</button>
       <button data-source="local">Local</button>
       <button data-source="demo" hidden>Demo</button>
@@ -75,6 +77,7 @@
           <p id="emptyText">Connect Spotify to see your albums and playlists here.</p>
           <div class="row center">
             <button class="primary" id="emptySpotify" hidden>Connect Spotify</button>
+            <button class="primary" id="emptyYouTube" hidden>Connect YouTube</button>
             <button class="ghost" id="emptyFolder" hidden>Open a music folder</button>
             <button class="primary" id="demoLoadBtn" hidden>Load demo shelf</button>
             <button class="ghost" onclick="openSettings()">Settings</button>
@@ -114,7 +117,7 @@
         <div class="np-from"><span>Playing from</span><b id="npFrom"></b></div>
         <button class="icon" id="npTracks" title="Album and tracks"><svg><use href="#i-list"/></svg></button>
       </header>
-      <div class="np-stage np-grab">
+      <div class="np-stage np-grab" id="npStage">
         <div class="vinyl" id="npVinyl"><span class="grain"></span><span class="label"><img alt="" id="npLabel"></span><span class="sheen"></span></div>
         <img id="npCover" class="np-cover" alt="">
       </div>
@@ -151,6 +154,7 @@
           <button class="primary" id="aPlay"><svg><use href="#i-play"/></svg><span>Play</span></button>
           <button class="ghost" id="aShuffle"><svg><use href="#i-shuffle"/></svg><span>Shuffle</span></button>
           <button class="ghost" id="aPutBack">Put back</button>
+          <button class="ghost" id="aOpenYt" hidden title="Open in YouTube Music">YouTube Music</button>
           <button id="aMore" class="icon" title="More"><svg><use href="#i-more"/></svg></button>
         </div>
         <div id="aMenu" class="menu" hidden>
@@ -196,6 +200,18 @@
         </div>
         <label class="check" id="sdkRow" hidden><input type="checkbox" id="sdkToggle"> Play Spotify in this browser (needs Spotify Premium)</label>
         <p class="hint" id="spFriends" hidden>Friends can use Spotify here once you add their Spotify account (name and email) under <b>User Management</b> in your app on the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify developer dashboard</a>. While the app is in Spotify's development mode, that's up to 5 people.</p>
+      </section>
+
+      <section id="ytSec" hidden>
+        <h3>YouTube</h3>
+        <div id="ytStatus" class="hint"></div>
+        <div class="row" id="ytButtons"></div>
+        <p class="hint" id="ytWarn" hidden>Google will say it hasn't checked Album Viewer yet. Choose <b>Advanced</b>, then <b>Go to <span id="ytHost"></span></b>. Album Viewer only reads your YouTube, never changes it.</p>
+        <div id="ytAdd" hidden>
+          <form class="row" id="ytForm"><input id="ytQuery" placeholder="Find an album or song, or paste a YouTube link" autocomplete="off" enterkeyhint="search"><button class="ghost" type="submit">Find</button></form>
+          <ul id="ytResults" class="yt-results"></ul>
+        </div>
+        <p class="hint">YouTube plays in YouTube's own player, which stays on screen while it plays. <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
       </section>
 
       <section id="devSec">
@@ -248,6 +264,14 @@
       <p class="hint" id="devHint"></p>
       <div class="row"><button class="ghost" id="devRefresh">Refresh</button><button class="ghost" id="devPick" hidden>Choose a speaker…</button></div>
     </div>
+  </div>
+
+  <!-- YouTube's player: over the full-screen player's stage, or floating above the bar (see Yt in app.js) -->
+  <div id="ytWin" hidden>
+    <div class="yt-bar"><span class="yt-name" id="ytName"></span>
+      <button class="icon" id="ytOpen" title="Open the player"><svg><use href="#i-up"/></svg></button>
+      <button class="icon" id="ytClose" title="Pause and close"><svg><use href="#i-close"/></svg></button></div>
+    <div id="ytFrame"></div>
   </div>
 
   <audio id="audio" preload="auto"></audio>

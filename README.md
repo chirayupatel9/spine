@@ -19,6 +19,10 @@ It's one small FastAPI server plus a touch-friendly web app. You can install it 
   - Your saved albums and your playlists sync onto the shelf; a **Playlists** tab shows just the playlists.
   - You can add any album or playlist by pasting its link.
   - Music plays on the screen you're using. The speaker button on the player shows where it's playing and moves Spotify to any of your Spotify speakers (phone, computer, speaker or TV). On Android it opens the phone's own list of outputs (Bluetooth and so on) for your own music.
+- **YouTube and YouTube Music.**
+  - Anyone signed in can connect their YouTube in Settings (read only). Their playlists, including the ones they made in YouTube Music, and their liked music come onto the shelf.
+  - Add any album, playlist or song by searching or pasting a YouTube or YouTube Music link.
+  - In the browser it plays in YouTube's own player, as whoever is signed in to YouTube there (Chrome), so YouTube Premium means no ads. The video has to stay on screen: it sits where the record is in the full-screen player, and floats above the bar otherwise. Closing it pauses the music. The Android app hands YouTube to the YouTube Music app instead.
 - **Music on your computer.** In Chrome or Edge, **Settings → Music on this computer** reads a folder of music on that computer and puts its albums on your shelf (from their tags, or their folders). Nothing is uploaded: it plays from the disk, and the browser keeps the folder for next time. Other browsers can open a folder for one visit. On Android, the app shows the music on the phone.
 - **Demo shelf.** One click loads 34 well-known albums from the iTunes catalogue, with real covers and 30-second previews that play on the screen. No account is needed, so you can try it before connecting anything. Remove it again in **Settings → Demo shelf**.
 - **The display.**
@@ -104,6 +108,21 @@ Notes:
 - If Spotify blocks the saved-albums endpoint for your app, Album Viewer falls back to building albums from your saved songs. You can also add albums by link.
 - Spotify shares a playlist's tracks only with its owner and collaborators. Playlists you just follow still go on the shelf and play, but their track list stays empty.
 - Spotify plays in the browser you're using (Settings → "Play Spotify in this browser", on by default), in Chrome, Edge, Firefox and Safari, on Android and iOS as well as desktop, according to Spotify. It needs full Premium: Spotify's mobile-only plans are excluded, and without Premium Spotify plays on another of your speakers instead. On iPhone and iPad, playback moved to the page from another device doesn't start until you tap. You can also pick the Spotify app on the device from the speaker button; that keeps playing if the device puts the browser to sleep. The Android app plays Spotify in the phone's Spotify app; if Spotify isn't open, the speaker list opens it.
+
+## YouTube setup (about 5 minutes, once Google sign-in works)
+
+YouTube uses the same Google OAuth client as sign-in. Connecting it is a second Google sign-in that asks for one more permission, `youtube.readonly`.
+
+1. In the same Google Cloud project, open **APIs & Services → Library**, find **YouTube Data API v3**, and select **Enable**.
+2. In **Google Auth Platform → Data access**, select **Add or remove scopes**, tick `.../auth/youtube.readonly` (*View your YouTube account*), select **Update**, write why under *How will the scopes be used?*, and **Save**.
+3. That's all: Settings now shows **Connect YouTube**. `YOUTUBE=0` in `.env` hides it.
+
+What you need to know:
+- **Google checks apps that read YouTube.** Until it has, everyone who connects sees "Google hasn't verified this app" (they choose *Advanced → Go to …*), and at most 100 people can connect. To lift that, submit the app under **Google Auth Platform → Verification Center**. It's free, and it needs a short screen recording, uploaded to YouTube as unlisted, showing the consent screen (with your client ID in the address bar) and the YouTube features in use.
+- **YouTube's rules decide how it plays.** Its player must be on screen while it plays (at least 200×200 pixels, with nothing over it), audio can't be played without the video, and nothing may play from a hidden player. That's why the video floats above the bar, and why the Android app hands YouTube to the YouTube Music app.
+- **YouTube's API has a daily allowance** of 10,000 units for the whole server: a search costs 100, most reads 1. Album Viewer syncs each person's playlists every 6 hours, reads a playlist's videos only when it's opened, and allows 25 searches a day per person and 50 in all. More allowance can be requested from YouTube for free.
+- Saved albums in YouTube Music can't come across: there's no official YouTube Music API, and Google's YouTube API sees only a person's own playlists and likes. Paste an album's link instead (in YouTube Music: **Share** on the album).
+- What comes from YouTube is refreshed at least every 30 days, as YouTube requires, and deleted when someone disconnects or takes back the access on their Google account.
 
 ## Hosting it
 - **At home (simplest).** Run it on a PC or server in your house. Open `http://<server-ip>:8000` from the tablet for local music. Spotify sign-in needs `PUBLIC_URL` to be https or 127.0.0.1, so use one of the options below for the Spotify part.
@@ -212,7 +231,7 @@ Every `/api/` call needs the sign-in cookie (`POST /login` with `password`).
 | Method | Path | |
 |---|---|---|
 | GET | `/api/me` | who is signed in |
-| GET | `/api/albums` | your shelf (`?source=local|spotify|demo|playlist&include_hidden=true`) |
+| GET | `/api/albums` | your shelf (`?source=local|spotify|youtube|demo|playlist&include_hidden=true`) |
 | GET | `/api/albums/{id}` | album + tracks |
 | PATCH | `/api/albums/{id}` | `{"hidden": true}` |
 | POST | `/api/albums/{id}/art` | upload a cover (multipart `file`, `MAX_UPLOAD_MB` max) |
@@ -223,6 +242,9 @@ Every `/api/` call needs the sign-in cookie (`POST /login` with `password`).
 | GET | `/api/local/stream/{track_id}` | audio stream (supports Range) |
 | POST | `/api/spotify/sync` / `add` / `play` / `transfer` | Spotify |
 | POST | `/api/spotify/control` | `{"action": "pause" \| "resume" \| "next" \| "previous" \| "seek" \| "shuffle" \| "repeat", "value": ...}` (seek: ms; shuffle: true/false; repeat: off, context or track) |
+| POST | `/api/youtube/add` | `{"link": "https://music.youtube.com/playlist?list=..."}`, or a search result's `{"id", "kind"}` |
+| GET | `/api/youtube/search` | `?q=` albums, playlists and songs on YouTube (rationed) |
+| POST | `/api/youtube/sync` / `disconnect` | YouTube |
 | GET | `/api/status` | scan / sync progress |
 | GET | `/healthz` | health check (no sign-in) |
 
@@ -233,6 +255,7 @@ app/config.py    settings from the environment, generated password
 app/library.py   folder scan, tag reading, album grouping
 app/artwork.py   embedded/folder/iTunes/MusicBrainz art, spine colours
 app/spotify.py   OAuth, saved-album sync, playback control
+app/youtube.py   connecting YouTube (read only), playlist and liked-music sync, search, adding by link
 app/demo.py      demo shelf from the iTunes catalogue (covers + 30-second previews)
 web/             the shelf UI (vanilla JS PWA, no build step)
 tests/           pytest suite

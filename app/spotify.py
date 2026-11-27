@@ -105,10 +105,13 @@ def store_tokens(uid: int, data: dict) -> None:
                   (uid, data["access_token"], data.get("refresh_token"), time.time() + int(data.get("expires_in", 3600)) - 60))
 
 
+_MINE = "(SELECT id FROM albums WHERE source='spotify')"   # Spotify's part of a shelf
+
+
 def disconnect(uid: int) -> None:
     with db.tx() as c:
         c.execute("DELETE FROM spotify_auth WHERE user_id=?", (uid,))
-        c.execute("DELETE FROM shelf WHERE user_id=?", (uid,))
+        c.execute(f"DELETE FROM shelf WHERE user_id=? AND album_id IN {_MINE}", (uid,))
         c.execute("UPDATE users SET spotify_id=NULL WHERE id=? AND (google_sub IS NOT NULL OR admin=1)", (uid,))
     prune()
 
@@ -278,8 +281,8 @@ def sync(uid: int) -> None:
     st.update(syncing=True, error=None, albums=0)
     try:
         _learn_id(uid)
-        with db.tx() as c:
-            c.execute("UPDATE shelf SET seen=0 WHERE user_id=? AND pinned=0", (uid,))
+        with db.tx() as c:   # only Spotify's: the shelf also holds YouTube's
+            c.execute(f"UPDATE shelf SET seen=0 WHERE user_id=? AND pinned=0 AND album_id IN {_MINE}", (uid,))
         count = 0
         for alb, added in _iter_saved_albums(uid):
             if not (alb.get("tracks") or {}).get("items"):
@@ -300,7 +303,7 @@ def sync(uid: int) -> None:
             with db.tx() as c:
                 c.execute("UPDATE shelf SET seen=1 WHERE user_id=? AND album_id LIKE 'pl_%'", (uid,))
         with db.tx() as c:
-            c.execute("DELETE FROM shelf WHERE user_id=? AND seen=0", (uid,))
+            c.execute(f"DELETE FROM shelf WHERE user_id=? AND seen=0 AND album_id IN {_MINE}", (uid,))
         prune()
         cache_art()
         st["last_sync"] = time.time()

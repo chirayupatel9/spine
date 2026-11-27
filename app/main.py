@@ -19,7 +19,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFi
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import artwork, config, db, demo, google, library, spotify, users
+from . import artwork, config, db, demo, google, library, spotify, users, youtube
 from .config import (ANDROID_CERT_SHA256, ANDROID_PACKAGE, APP_PASSWORD, ART_DIR, GOOGLE_REDIRECT_URI, MAX_UPLOAD_MB,
                      MUSIC_DIR, PASSWORD_FILE, PASSWORD_FROM_ENV, PASSWORD_GENERATED, PUBLIC_URL, RESCAN_MINUTES,
                      SPOTIFY_REDIRECT_URI)
@@ -44,6 +44,7 @@ async def _background():
     while True:
         library.start_scan()
         threading.Thread(target=spotify.sync_everyone, daemon=True).start()
+        threading.Thread(target=youtube.sync_everyone, daemon=True).start()   # each person every few hours
         if RESCAN_MINUTES <= 0:
             return
         await asyncio.sleep(RESCAN_MINUTES * 60)
@@ -66,6 +67,8 @@ async def lifespan(app: FastAPI):
             log.warning("ADMIN_EMAIL isn't set: no Google account will see the music folder or the admin settings")
     if spotify.configured():
         log.info("Spotify redirect URI (add this in your Spotify app settings): %s", SPOTIFY_REDIRECT_URI)
+    if youtube.configured():
+        log.info("YouTube is on: people connect theirs in Settings (YouTube Data API v3 must be on in the Google Cloud project)")
     yield
     task.cancel()
 
@@ -83,7 +86,7 @@ OPEN_PATHS = frozenset({
     "/login", "/healthz", "/manifest.webmanifest", "/.well-known/assetlinks.json",
     "/icon.svg", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png",
     "/auth/google/login", "/auth/google/callback", "/auth/spotify/login", "/auth/spotify/callback", "/auth/app/exchange",
-    "/auth/spotify/start", "/privacy",
+    "/auth/spotify/start", "/auth/youtube/start", "/privacy", "/terms",
 })
 # Caching. Cloudflare (or any shared cache) must never keep anything behind sign-in, nor a sign-in
 # redirect: a cached redirect for /app.js would break the app for everyone. Signed-in responses are
@@ -206,8 +209,8 @@ button{background:#f04f23;color:#fff}
 svg{width:18px;height:18px;flex:none}
 .err{color:#ff8a6b;margin:0;font-size:14px;line-height:1.45}
 .or{color:rgba(255,255,255,.35);font-size:12px;text-align:center;letter-spacing:.12em}
-.foot{margin:10px 0 0;text-align:center;font-size:12.5px}.foot a{display:inline;padding:0;font-weight:400;color:rgba(255,255,255,.4)}</style></head><body>
-<main><h1>ALBUM VIEWER</h1><p class=sub>Your albums as a row of spines on the wall.</p>{err}{buttons}<p class=foot><a href=/privacy>Privacy</a></p></main>
+.foot{margin:10px 0 0;text-align:center;font-size:12.5px;color:rgba(255,255,255,.3)}.foot a{display:inline;padding:0;font-weight:400;color:rgba(255,255,255,.4)}</style></head><body>
+<main><h1>ALBUM VIEWER</h1><p class=sub>Your albums as a row of spines on the wall.</p>{err}{buttons}<p class=foot><a href=/privacy>Privacy</a> · <a href=/terms>Terms</a></p></main>
 </body></html>"""
 
 # What the app keeps about the people who sign in, and why. Public (Google's sign-in screen and the
@@ -219,30 +222,67 @@ main{max-width:640px;margin:0 auto;padding:48px 24px 64px}
 h1{font-size:15px;font-weight:700;letter-spacing:.16em;margin:0 0 4px}
 h2{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.5);margin:32px 0 8px}
 p,li{color:rgba(255,255,255,.78)}ul{padding-left:20px}a{color:#f04f23}.date{color:rgba(255,255,255,.4);font-size:14px}</style></head><body><main>
-<h1>ALBUM VIEWER</h1><p class=date>Privacy · last updated 27 November 2026</p>
+<h1>ALBUM VIEWER</h1><p class=date>Privacy · last updated November 2026</p>
 <p>Album Viewer is a personal music shelf that one person runs on their own server. It isn't a company,
 and it has no ads, analytics or trackers.</p>
 <h2>What it keeps, and why</h2>
 <ul>
 <li><b>If you sign in with Google:</b> your name, email address and profile picture, to know who you are and
-show your account. Album Viewer never sees your Google password, and asks Google for nothing else.</li>
+show your account. Album Viewer never sees your Google password.</li>
 <li><b>If you connect Spotify:</b> your Spotify profile and a sign-in token from Spotify, to put your saved albums
 and playlists on your shelf, and to play, pause and skip on your Spotify devices when you ask it to.</li>
+<li><b>If you connect YouTube:</b> see <a href="#youtube">YouTube</a> below.</li>
 <li><b>Your shelf:</b> the order you arrange it in and the albums you hide.</li>
 <li><b>Music on your computer or phone</b> stays there: the app reads it on your device and uploads nothing.</li>
 </ul>
+<h2 id=youtube>YouTube</h2>
+<p>Album Viewer uses YouTube API Services. If you connect YouTube in Settings, you let it <b>see</b> your YouTube
+account (read only: it never changes anything there). It uses that to:</p>
+<ul>
+<li>list your playlists, including the ones you made in YouTube Music, and your liked music, and put them on your shelf;</li>
+<li>list the videos in a playlist or album when you open it, so they play in order.</li>
+</ul>
+<p>It keeps your YouTube channel's name, a sign-in token from Google, and the names, covers and track lists of what's on
+your shelf. That is refreshed at least every 30 days and deleted when you disconnect. Only you see your shelf.</p>
+<p>Music from YouTube plays in YouTube's own player, which Google runs: when it plays, YouTube may set cookies and
+collect information under the <a href="https://www.google.com/policies/privacy">Google Privacy Policy</a>. Album Viewer
+itself shares nothing with YouTube or anyone else.</p>
+<p>Disconnect YouTube in Settings and Album Viewer takes back its access at Google and deletes everything that came from
+YouTube. You can also take its access away on your Google account's
+<a href="https://security.google.com/settings/security/permissions">security settings page</a>; it then deletes the same,
+within a day. Using YouTube here means agreeing to the <a href="https://www.youtube.com/t/terms">YouTube Terms of
+Service</a> (see <a href=/terms>Terms</a>).</p>
 <h2>Where it's kept</h2>
 <p>In a database on the server that runs Album Viewer. It isn't sold, shared or used for anything else.
 One cookie keeps you signed in.</p>
 <h2>Removing it</h2>
-<p>Disconnecting Spotify in Settings deletes its token and takes your Spotify albums off your shelf. To delete
-your account, ask the person who runs this server: their address is on Google's sign-in screen.</p>
+<p>Disconnecting Spotify or YouTube in Settings deletes its token and takes its albums off your shelf. To delete
+your account, or with any question, ask the person who runs this server: their email address is on Google's
+sign-in screen for Album Viewer.</p>
 <h2>Google</h2>
 <p>Album Viewer's use and transfer of information received from Google APIs adheres to the
 <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
 including the Limited Use requirements.</p>
-<p><a href=/>Back to Album Viewer</a></p>
+<p><a href=/terms>Terms</a> · <a href=/>Back to Album Viewer</a></p>
 </main></body></html>"""
+
+# The terms YouTube asks for (developers.google.com/youtube/terms/developer-policies, III.A.1).
+TERMS_HTML = (PRIVACY_HTML.split("<main>")[0].replace("Privacy · Album Viewer", "Terms · Album Viewer") + """<main>
+<h1>ALBUM VIEWER</h1><p class=date>Terms · last updated November 2026</p>
+<p>Album Viewer is a personal music shelf that one person runs on their own server, for themselves and the people
+they invite. It's free, it comes as it is, and it may change or stop at any time.</p>
+<h2>Using it</h2>
+<ul>
+<li>Use it for your own listening, not to play music in public or for a business.</li>
+<li>Spotify, YouTube and your own music folders stay subject to their own terms: Album Viewer only shows and plays
+what you could already listen to there.</li>
+<li><b>YouTube:</b> Album Viewer uses YouTube API Services. By using its YouTube features you agree to be bound by the
+<a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>.</li>
+</ul>
+<h2>Your data</h2>
+<p>What Album Viewer keeps, and how to remove it, is on the <a href=/privacy>privacy page</a>.</p>
+<p><a href=/privacy>Privacy</a> · <a href=/>Back to Album Viewer</a></p>
+</main></body></html>""")
 G_ICON = ('<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z"/>'
           '<path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.2v3.1A12 12 0 0 0 12 24z"/>'
           '<path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.2a12 12 0 0 0 0 10.8z"/>'
@@ -274,6 +314,11 @@ def login_page(error: str | None = None):
 @app.get("/privacy", include_in_schema=False)
 def privacy_page():
     return HTMLResponse(PRIVACY_HTML)
+
+
+@app.get("/terms", include_in_schema=False)
+def terms_page():
+    return HTMLResponse(TERMS_HTML)
 
 
 @app.post("/login", include_in_schema=False)
@@ -328,10 +373,12 @@ def _flow_redirect(url: str, state: str) -> RedirectResponse:
     return r
 
 
-def _take_flow(request: Request, provider: str, state: str | None) -> dict | None:
+def _take_flow(request: Request, providers: tuple[str, ...], state: str | None) -> dict | None:
     if not state or not hmac.compare_digest(state.encode(), request.cookies.get(FLOW_COOKIE, "").encode()):
         return None
-    row = db.one("SELECT * FROM oauth_flows WHERE state=? AND provider=?", (state, provider))
+    row = db.one("SELECT * FROM oauth_flows WHERE state=?", (state,))
+    if row and row["provider"] not in providers:
+        row = None
     with db.tx() as c:
         c.execute("DELETE FROM oauth_flows WHERE state=?", (state,))
     return row if row and row["expires_at"] > time.time() else None
@@ -348,8 +395,8 @@ def _app_challenge(app_: str | None, challenge: str | None) -> str | None:
 def _flow_error(flow: dict | None, message: str) -> RedirectResponse:
     if flow and (flow.get("app_challenge") or flow.get("app")):
         r = RedirectResponse(f"{APP_SCHEME}://auth?error={quote(message)}", status_code=303)
-    elif flow and flow.get("user_id"):
-        r = RedirectResponse(f"/?spotify_error={quote(message)}", status_code=303)
+    elif flow and flow.get("user_id"):   # connecting Spotify or YouTube to someone signed in
+        r = RedirectResponse(f"/?{flow['provider']}_error={quote(message)}", status_code=303)
     else:
         r = RedirectResponse(f"/login?error={quote(message)}", status_code=303)
     r.delete_cookie(FLOW_COOKIE)
@@ -377,9 +424,12 @@ def google_login(app_: str | None = Query(None, alias="app"), challenge: str | N
 
 @app.get("/auth/google/callback", include_in_schema=False)
 def google_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
-    flow = _take_flow(request, "google", state)
+    """Google sends both its sign-ins here: signing in, and connecting YouTube."""
+    flow = _take_flow(request, ("google", "youtube"), state)
     if not flow:
         return _flow_error(None, "That sign-in took too long or came from another browser. Try again.")
+    if flow["provider"] == "youtube":
+        return _youtube_connected(flow, code, error)
     if error or not code:
         return _flow_error(flow, "Google sign-in was cancelled" if error in (None, "access_denied") else f"Google: {error}")
     try:
@@ -405,6 +455,7 @@ def whoami(request: Request):
     u = _user(request)
     hidden = [r["album_id"] for r in db.query("SELECT album_id FROM hidden WHERE user_id=? AND album_id LIKE 'dev_%'", (u["id"],))]
     return {**users.public(u), "spotify": {"configured": spotify.configured(), "connected": spotify.connected(u["id"])},
+            "youtube": {"configured": youtube.configured(), "connected": youtube.connected(u["id"])},
             "device_hidden": hidden}
 
 
@@ -458,15 +509,17 @@ def _album_out(a: dict) -> dict:
         "art": _art_url(a),
         "art_status": a["art_status"], "art_source": a["art_source"], "hidden": bool(a.get("is_hidden")),
         "added_at": a.get("shelved_at") or a["added_at"], "tracks": a.get("n_tracks"),
+        **({"open_url": youtube.open_url(a)} if a["source"] == "youtube" else {}),
     }
 
 
-# What each person sees: the demo shelf, their own Spotify albums and playlists, and (for the admin)
-# the server's music folder. Music on someone's own device never reaches the server.
+# What each person sees: the demo shelf, their own Spotify and YouTube albums and playlists, and
+# (for the admin) the server's music folder. Music on someone's own device never reaches the server.
 _SHELF = ("""SELECT a.*, COALESCE(a.track_count, (SELECT COUNT(*) FROM tracks t WHERE t.album_id=a.id)) AS n_tracks,
              s.added_at AS shelved_at, EXISTS(SELECT 1 FROM hidden h WHERE h.user_id=:uid AND h.album_id=a.id) AS is_hidden
              FROM albums a LEFT JOIN shelf s ON s.album_id=a.id AND s.user_id=:uid
-             WHERE (a.source='demo' OR (a.source='local' AND :admin=1) OR (a.source='spotify' AND s.user_id IS NOT NULL))""")
+             WHERE (a.source='demo' OR (a.source='local' AND :admin=1)
+                    OR (a.source IN ('spotify', 'youtube') AND s.user_id IS NOT NULL))""")
 
 
 def _params(u: dict, **more) -> dict:
@@ -482,7 +535,10 @@ def _album_detail(u: dict, album_id: str) -> dict:
     if not a:
         raise HTTPException(404, "Album not found")
     out = _album_out(a)
-    if out["kind"] == "playlist":
+    if a["source"] == "youtube":
+        out["track_list"] = _yt(youtube.tracks, u["id"], a)
+        out["tracks"] = len(out["track_list"]) or out["tracks"]
+    elif out["kind"] == "playlist":
         try:
             out["track_list"], out["tracks_shared"] = spotify.playlist_tracks(u["id"], album_id)
         except spotify.SpotifyError:
@@ -497,7 +553,7 @@ def _album_detail(u: dict, album_id: str) -> dict:
 def list_albums(request: Request, source: str | None = None, include_hidden: bool = False):
     u = _user(request)
     sql, p = _SHELF, _params(u)
-    if source in ("local", "spotify", "demo"):
+    if source in ("local", "spotify", "youtube", "demo"):
         sql += " AND a.source=:source"
         p["source"] = source
     elif source == "playlist":
@@ -599,6 +655,7 @@ def status(request: Request):
         "demo": {**demo.status, "albums": demo.count()},
         "spotify": {"configured": spotify.configured(), "connected": spotify.connected(u["id"]),
                     "redirect_uri": SPOTIFY_REDIRECT_URI, **spotify.status(u["id"])},
+        "youtube": youtube.status(u["id"]),
     }
 
 
@@ -658,7 +715,7 @@ def spotify_login(request: Request, mode: str | None = None, app_: str | None = 
 
 @app.get("/auth/spotify/callback", include_in_schema=False)
 def spotify_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
-    flow = _take_flow(request, "spotify", state)
+    flow = _take_flow(request, ("spotify",), state)
     if not flow:
         return _flow_error(None, "That sign-in took too long or came from another browser. Try again.")
     if error or not code:
@@ -758,6 +815,97 @@ def spotify_transfer(request: Request, body: dict = Body(...)):
         raise HTTPException(400, "device_id is required")
     _sp(spotify.transfer, _user(request)["id"], body["device_id"], body.get("play", True))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- youtube
+# Connecting YouTube is a second Google sign-in, for read-only YouTube access (see youtube.py). It
+# comes back through /auth/google/callback, the one address the Google client has.
+
+def _yt(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except youtube.YouTubeError as e:
+        # YouTube's "not signed in" isn't Album Viewer's: a 401 would sign the apps out
+        raise HTTPException(403 if e.status == 401 else e.status if 400 <= e.status < 600 else 502, str(e))
+
+
+def _youtube_redirect(flow: dict) -> RedirectResponse:
+    verifier = secrets.token_urlsafe(48)
+    with db.tx() as c:   # the PKCE secret, kept with the flow until Google sends them back
+        c.execute("UPDATE oauth_flows SET verifier=? WHERE state=?", (verifier, flow["state"]))
+    hint = (users.get(flow["user_id"]) or {}).get("email") or None
+    return _flow_redirect(youtube.authorize_url(flow["state"], users.challenge_of(verifier), hint), flow["state"])
+
+
+@app.get("/auth/youtube/login", include_in_schema=False)
+def youtube_login(request: Request):
+    """Connect YouTube to the account signed in here."""
+    if not youtube.configured():
+        return RedirectResponse("/?youtube_error=" + quote("YouTube isn't set up on this server"), status_code=303)
+    state = _start_flow("youtube", user_id=_user(request)["id"])
+    return _youtube_redirect({"state": state, "user_id": _user(request)["id"]})
+
+
+@app.post("/api/youtube/connect-link")
+def youtube_connect_link(request: Request):
+    """For the Android app: a one-time address that connects YouTube to this account in a browser
+    tab, then comes back to the app."""
+    if not youtube.configured():
+        raise HTTPException(400, "YouTube isn't set up on this server")
+    state = _start_flow("youtube", user_id=_user(request)["id"], app=True)
+    return {"url": f"{PUBLIC_URL}/auth/youtube/start?flow={state}"}
+
+
+@app.get("/auth/youtube/start", include_in_schema=False)
+def youtube_start(flow: str = ""):
+    row = db.one("SELECT state, user_id FROM oauth_flows WHERE state=? AND provider='youtube' AND app=1 AND expires_at > ?",
+                 (flow, time.time()))
+    if not row:
+        return RedirectResponse(f"{APP_SCHEME}://auth?error={quote('That link expired. Try again.')}", status_code=303)
+    return _youtube_redirect(row)
+
+
+def _youtube_connected(flow: dict, code: str | None, error: str | None) -> RedirectResponse:
+    if error or not code:
+        return _flow_error(flow, "Connecting YouTube was cancelled" if error in (None, "access_denied") else f"Google: {error}")
+    try:
+        tokens = youtube.exchange_code(code, flow["verifier"] or "")
+    except youtube.YouTubeError as e:
+        return _flow_error(flow, str(e))
+    youtube.store_tokens(flow["user_id"], tokens, new=True)
+    youtube.start_sync(flow["user_id"])
+    r = RedirectResponse(f"{APP_SCHEME}://auth?connected=youtube" if flow.get("app") else "/?youtube=connected", status_code=303)
+    r.delete_cookie(FLOW_COOKIE)
+    return r
+
+
+@app.post("/api/youtube/disconnect")
+def youtube_disconnect(request: Request):
+    youtube.disconnect(_user(request)["id"])
+    return {"ok": True}
+
+
+@app.post("/api/youtube/sync")
+def youtube_sync(request: Request):
+    return {"started": youtube.start_sync(_user(request)["id"])}
+
+
+@app.post("/api/youtube/add")
+def youtube_add(request: Request, body: dict = Body(...)):
+    """By link (`link`), or a search result (`id` and its `kind`: album, playlist or song)."""
+    u = _user(request)
+    if not youtube.connected(u["id"]):
+        raise HTTPException(400, "Connect YouTube first")
+    kind = body.get("kind") if body.get("kind") in ("album", "playlist", "song") else None
+    return _album_detail(u, _yt(youtube.add, u["id"], str(body.get("id") if kind else body.get("link") or ""), kind))
+
+
+@app.get("/api/youtube/search")
+def youtube_search(request: Request, q: str = ""):
+    u = _user(request)
+    if not youtube.connected(u["id"]):
+        raise HTTPException(400, "Connect YouTube first")
+    return _yt(youtube.search, u["id"], q)
 
 
 # ---------------------------------------------------------------- frontend

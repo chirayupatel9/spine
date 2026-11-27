@@ -9,11 +9,11 @@ _lock = threading.RLock()
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS albums (
     id TEXT PRIMARY KEY,
-    source TEXT NOT NULL,            -- 'local' | 'spotify'
+    source TEXT NOT NULL,            -- 'local' | 'spotify' | 'youtube' | 'demo'
     title TEXT NOT NULL,
     artist TEXT NOT NULL,
     year TEXT,
-    uri TEXT,                        -- spotify:album:...
+    uri TEXT,                        -- spotify:album:..., youtube:playlist:..., youtube:video:..., youtube:liked
     remote_art TEXT,                 -- spotify image url
     art_file TEXT,                   -- cached file name in ART_DIR
     art_status TEXT DEFAULT 'pending', -- pending | ok | missing
@@ -66,7 +66,15 @@ CREATE TABLE IF NOT EXISTS spotify_auth (
     refresh_token TEXT,
     expires_at REAL
 );
-CREATE TABLE IF NOT EXISTS shelf (   -- the Spotify albums and playlists on each person's shelf
+CREATE TABLE IF NOT EXISTS youtube_auth (   -- read-only YouTube access each person gave (see youtube.py)
+    user_id INTEGER PRIMARY KEY,
+    access_token TEXT,
+    refresh_token TEXT,
+    expires_at REAL,
+    channel TEXT,                    -- their YouTube channel's name; '' if the account has none
+    connected_at REAL
+);
+CREATE TABLE IF NOT EXISTS shelf (   -- the Spotify and YouTube albums and playlists on each person's shelf
     user_id INTEGER NOT NULL,
     album_id TEXT NOT NULL,
     added_at REAL,
@@ -118,6 +126,10 @@ def _migrate() -> None:
             _conn.execute(f"ALTER TABLE albums ADD COLUMN {name} {ddl}")
     if "app" not in {r[1] for r in _conn.execute("PRAGMA table_info(oauth_flows)")}:
         _conn.execute("ALTER TABLE oauth_flows ADD COLUMN app INTEGER DEFAULT 0")
+    cols = {r[1] for r in _conn.execute("PRAGMA table_info(tracks)")}
+    for name in ("kids", "noembed"):   # YouTube: made for kids; won't play outside YouTube
+        if name not in cols:
+            _conn.execute(f"ALTER TABLE tracks ADD COLUMN {name} INTEGER DEFAULT 0")
 
 
 _migrate()

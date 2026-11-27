@@ -31,6 +31,10 @@ GOOGLE_REDIRECT_URI = f"{PUBLIC_URL}/auth/google/callback"
 ADMIN_EMAIL = _env("ADMIN_EMAIL").lower()
 PASSWORD_SIGN_IN = not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 
+# YouTube and YouTube Music: each person can connect theirs (read only). It uses the Google OAuth
+# client above, with the YouTube Data API v3 turned on in its Google Cloud project. YOUTUBE=0 hides it.
+YOUTUBE = _env("YOUTUBE", "1").lower() not in ("0", "false", "no")
+
 SPOTIFY_CLIENT_ID = _env("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = _env("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_REDIRECT_URI = f"{PUBLIC_URL}/auth/spotify/callback"

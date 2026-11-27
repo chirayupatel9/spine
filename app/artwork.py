@@ -277,6 +277,31 @@ def save_art(album_id: str, data: bytes) -> tuple[str, str, str] | None:
     return name, color, text_color_for(color)
 
 
+def square_crop(data: bytes) -> bytes | None:
+    """A square cover from a video thumbnail. YouTube's thumbnails are video frames, often with
+    black bars (a 16:9 frame in a 4:3 image, an album cover in a 16:9 frame): bars that are the same
+    on both sides are trimmed, then the middle square is kept."""
+    try:
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+    except Exception:
+        return None
+    w, h = img.size
+    box = img.convert("L").point(lambda p: 255 if p > 24 else 0).getbbox()
+    if box:
+        left, top, right, bottom = box
+        if abs(left - (w - right)) > w * 0.04 or right - left < w * 0.3:   # not bars: keep the width
+            left, right = 0, w
+        if abs(top - (h - bottom)) > h * 0.04 or bottom - top < h * 0.3:
+            top, bottom = 0, h
+        img = img.crop((left, top, right, bottom))
+    w, h = img.size
+    s = min(w, h)
+    img = img.crop(((w - s) // 2, (h - s) // 2, (w - s) // 2 + s, (h - s) // 2 + s))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=92)
+    return buf.getvalue()
+
+
 def dominant_color(img: Image.Image) -> str:
     small = img.convert("RGB").resize((64, 64))
     pal = small.quantize(colors=8, method=Image.Quantize.MEDIANCUT)

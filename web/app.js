@@ -602,9 +602,11 @@ function applyAlbums(list, animateNew) {
   S.byId = new Map(list.map(a => [a.id, a]));
   S.loaded = true;
   const hasDemo = list.some(a => a.source === "demo"), hasLists = list.some(a => a.kind === "playlist");
+  const hasYt = list.some(a => a.source === "youtube");
   $('#sourceSeg [data-source="demo"]').hidden = !hasDemo;
   $('#sourceSeg [data-source="playlist"]').hidden = !hasLists;
-  if ((S.source === "demo" && !hasDemo) || (S.source === "playlist" && !hasLists)) setSource("all");
+  $('#sourceSeg [data-source="youtube"]').hidden = !hasYt;
+  if ((S.source === "demo" && !hasDemo) || (S.source === "playlist" && !hasLists) || (S.source === "youtube" && !hasYt)) setSource("all");
   render();
 }
 
@@ -929,9 +931,10 @@ async function openSheet(id, fromEl) {
   $("#aCover").style.background = a.color;
   $("#aTitle").textContent = a.title;
   $("#aArtist").textContent = a.kind === "playlist" ? (a.tracks ? `${a.tracks} songs` : "") : a.artist + (a.year ? ` · ${a.year}` : "");
-  $("#aSource").textContent = a.kind === "playlist" ? "Spotify playlist" :
+  $("#aSource").textContent = a.source === "youtube" ? ytSource(a) : a.kind === "playlist" ? "Spotify playlist" :
     { spotify: "Spotify", demo: "Demo shelf · 30-second previews", device: "On this computer" }[a.source] ||
     "Music folder" + (a.art_status === "missing" ? " · no cover found" : "");
+  $("#aOpenYt").hidden = !a.open_url;
   $("#aHide").textContent = a.hidden ? "Show on shelf" : "Hide from shelf";
   $("#aFixArt").hidden = a.source !== "local";
   $("#aMenu").hidden = true; $("#artForm").hidden = true;
@@ -979,13 +982,27 @@ function renderSheetState() {
     return;
   }
   $("#aTracks").innerHTML = a.track_list.map((t, i) =>
-    `<li data-i="${i}" class="${Player.isTrack(t.id) ? "now" : ""}"><span class="n">${multiDisc ? (t.disc_no || 1) + "." : ""}${t.track_no || i + 1}</span>` +
-    `<span class="tt">${esc(t.title)}${t.artist && t.artist !== a.artist ? ` <span style="color:var(--muted)">· ${esc(t.artist)}</span>` : ""}</span>` +
+    `<li data-i="${i}" class="${Player.isTrack(t.id) ? "now" : ""}${t.embeddable === false ? " off" : ""}"><span class="n">${multiDisc ? (t.disc_no || 1) + "." : ""}${t.track_no || i + 1}</span>` +
+    `<span class="tt">${esc(t.title)}${t.artist && t.artist !== a.artist ? ` <span style="color:var(--muted)">· ${esc(t.artist)}</span>` : ""}` +
+    `${t.embeddable === false ? ' <span class="only">plays on YouTube</span>' : ""}</span>` +
     `<span class="d">${fmt(t.duration)}</span></li>`).join("");
 }
 
+/* YouTube: what it is, and where it plays in YouTube Music (the app, on a phone that has it) */
+function ytSource(a) {
+  return a.id.startsWith("yl_") ? "Liked music · YouTube" : a.id.startsWith("yv_") ? "YouTube" :
+    a.kind === "playlist" ? "YouTube playlist" : "YouTube Music album";
+}
+function ytTrackUrl(a, t) {
+  const list = (a.open_url || "").match(/[?&]list=([\w-]+)/)?.[1];
+  return `https://music.youtube.com/watch?v=${encodeURIComponent(t.uri)}${list ? `&list=${list}` : ""}`;
+}
+$("#aOpenYt").onclick = () => { if (S.sheet?.open_url) window.open(S.sheet.open_url, "_blank", "noopener"); };
+
 $("#aTracks").addEventListener("click", e => {
   const li = e.target.closest("li[data-i]"); if (!li) return;
+  const t = S.sheet.track_list[+li.dataset.i];
+  if (S.sheet.source === "youtube" && t?.embeddable === false) { window.open(ytTrackUrl(S.sheet, t), "_blank", "noopener"); return; }
   setOpen(S.sheet.id);
   Player.playAlbum(S.sheet, +li.dataset.i).then(renderSheetState);
 });
@@ -1049,13 +1066,177 @@ $("#artFile").onchange = async e => {
   } catch (err) { $("#artMsg").textContent = err.message; }
 };
 
+/* ======================================================== YouTube
+   YouTube and YouTube Music play in YouTube's own player (its IFrame Player API). YouTube's rules
+   say that player must be on screen whenever it plays, at least 200×200 pixels, with nothing over
+   it. So it has a window of its own: in the full-screen player it sits on the stage, where the
+   record goes, and rises and falls with it; with that put away it floats above the bar. Closing the
+   window pauses the music. The window never moves within the page (an iframe that does reloads):
+   it's only placed over things. */
+
+const YT_HOST = "https://www.youtube.com", YT_KIDS = "https://www.youtube-nocookie.com";
+const Yt = {
+  win: $("#ytWin"), player: null, host: null, vid: null, state: -1, shown: false, raf: 0, n: 0, tickT: 0,
+
+  api() {   // YouTube's script, loaded the first time something plays
+    if (window.YT?.Player) return Promise.resolve();
+    return this.apiP ||= new Promise((resolve, reject) => {
+      const before = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { before?.(); resolve(); };
+      const s = document.createElement("script");
+      s.src = YT_HOST + "/iframe_api";
+      s.onerror = () => { this.apiP = null; s.remove(); reject(new Error("YouTube's player didn't load. Check the connection, then try again.")); };
+      document.head.appendChild(s);
+    });
+  },
+  /* Videos made for kids play from youtube-nocookie.com, with tracking off as YouTube asks; the rest
+     from youtube.com, so they play as whoever is signed in to YouTube in this browser. */
+  hostFor(t) { return t.kids ? YT_KIDS : YT_HOST; },
+  async make(t, n) {
+    await this.api();
+    if (n !== this.n) return null;   // something else was picked meanwhile
+    this.destroy();
+    this.host = this.hostFor(t); this.vid = t.uri;
+    const f = document.createElement("iframe");
+    f.title = "YouTube video player";
+    f.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+    f.referrerPolicy = "strict-origin-when-cross-origin";   // YouTube's player has to know which site it's on
+    const q = new URLSearchParams({ enablejsapi: 1, playsinline: 1, rel: 0, controls: 0, autoplay: 1, origin: location.origin, widget_referrer: location.origin });
+    f.src = `${this.host}/embed/${encodeURIComponent(t.uri)}?${q}`;
+    $("#ytFrame").replaceChildren(f);
+    const p = await new Promise((resolve, reject) => {
+      const player = new YT.Player(f, { events: {
+        onReady: () => resolve(player),
+        onStateChange: e => { if (this.player === player) this.changed(e.data); },
+        onError: e => { if (this.player === player) this.failed(e.data); },
+      } });
+      this.player = player;
+      setTimeout(() => reject(new Error("YouTube's player didn't start. Try again.")), 20000);
+    });
+    return n === this.n ? p : null;
+  },
+  destroy() {
+    try { this.player?.destroy(); } catch {}
+    this.player = null; this.host = null; this.vid = null; this.state = -1;
+    $("#ytFrame").replaceChildren();
+  },
+  async play(t) {
+    const n = ++this.n;
+    this.show();   // on screen before it starts: YouTube's rule
+    $("#ytName").textContent = t.title;
+    if (this.player && this.host === this.hostFor(t)) { this.vid = t.uri; this.player.loadVideoById(t.uri); }
+    else await this.make(t, n);
+    this.ticking();
+  },
+  pause() { try { this.player?.pauseVideo(); } catch {} },
+  resume() {
+    this.show();
+    try { this.player?.playVideo(); } catch {}
+  },
+  /* what YouTube's player says it's doing (its events don't always arrive, e.g. in a hidden tab) */
+  apiState() { try { const s = this.player?.getPlayerState?.(); return typeof s === "number" ? s : null; } catch { return null; } },
+  playing() { const s = this.apiState() ?? this.state; return s === 1 || s === 3; },
+  time() { try { return this.player?.getCurrentTime?.() || 0; } catch { return 0; } },
+  duration() { try { return this.player?.getDuration?.() || 0; } catch { return 0; } },
+  seek(s) { try { this.player?.seekTo(s, true); } catch {} },
+
+  changed(s) {   // -1 not started, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
+    if (s === this.state) return;   // heard twice: from the event and from ticking()
+    this.state = s;
+    if (Player.mode !== "youtube") return;
+    if (s === 0) return Player.ended();
+    Player.ui({ playing: this.playing(), ...(s === 1 ? { dur: this.duration() || Player.cur.dur } : {}) });
+    updatePill(); renderSheetState();
+  },
+  failed(code) {   // 2 bad id, 5 can't play in this browser, 100 gone or private, 101/150 owner doesn't allow it here
+    if (Player.mode !== "youtube") return;
+    toast(code === 101 || code === 150 ? "That one plays only on YouTube, skipping" : code === 100 ? "That one isn't on YouTube any more, skipping" : "YouTube couldn't play that one, skipping");
+    setTimeout(() => Player.next(), 900);
+  },
+  /* The bar and the full-screen player follow the video's clock. */
+  ticking() {
+    clearInterval(this.tickT);
+    this.tickT = setInterval(() => {
+      if (Player.mode !== "youtube") return clearInterval(this.tickT);
+      const s = this.apiState();
+      if (s !== null && s !== this.state) this.changed(s);   // an event that went missing
+      if (this.playing() && !document.hidden) Player.ui({ pos: this.time(), dur: this.duration() || Player.cur.dur });
+    }, 250);
+  },
+
+  /* ---- where the window is */
+  show() {
+    if (!this.shown) { this.shown = true; this.win.hidden = false; np.classList.add("yt"); }   // the stage makes room for it
+    this.place();
+  },
+  hide() {
+    this.pause();
+    this.shown = false;
+    cancelAnimationFrame(this.raf);
+    this.win.hidden = true; this.win.classList.remove("docked"); this.win.style.cssText = "";
+    document.body.classList.remove("yt-mini");
+    np.classList.remove("yt");   // the cover is back on the stage
+  },
+  /* On the stage while the full-screen player is up with nothing over it; else floating. */
+  place() {
+    if (!this.shown) return;
+    const dock = NP.isOpen && !$$(".sheet").some(s => s.classList.contains("in"));
+    if (dock && !this.win.classList.contains("docked")) this.dock();
+    else if (!dock && (this.win.classList.contains("docked") || !document.body.classList.contains("yt-mini"))) this.float();
+  },
+  rect() { const r = this.win.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; },
+  set(r) { Object.assign(this.win.style, { left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px", right: "auto", bottom: "auto" }); },
+  /* Move with whatever it's over, easing in from where it was. Without `done`, it keeps following
+     (the full-screen player rising, being dragged down, scrolled, resized). */
+  run(target, dur, ease, done) {
+    cancelAnimationFrame(this.raf);
+    const from = this.rect(), t0 = performance.now();
+    const step = now => {
+      const k = dur > 0 ? Math.min(1, (now - t0) / dur) : 1, e = ease(k), to = target();
+      this.set(k < 1 ? { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, w: from.w + (to.w - from.w) * e, h: from.h + (to.h - from.h) * e } : to);
+      if (k < 1 || !done) this.raf = requestAnimationFrame(step); else done();
+    };
+    step(t0);   // placed at once, not a frame later
+  },
+  dock() {
+    this.win.classList.add("docked"); document.body.classList.remove("yt-mini");
+    this.run(() => { const r = $("#npStage").getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; },
+      reduceMotion.matches ? 0 : 460, cssEase("--ease-open"));
+  },
+  /* just above the bar, wherever the bar is (it wraps onto two lines on phones) */
+  clearBar() {
+    const bar = $("#player");
+    document.documentElement.style.setProperty("--yt-bottom", `${bar.hidden ? 16 : Math.max(16, innerHeight - bar.getBoundingClientRect().top + 12)}px`);
+  },
+  float() {
+    this.clearBar();
+    const keep = this.win.style.cssText, docked = this.win.classList.contains("docked");
+    this.win.style.cssText = ""; this.win.classList.remove("docked");
+    const to = this.rect();   // where CSS floats it
+    if (!docked) { document.body.classList.add("yt-mini"); return; }
+    this.win.style.cssText = keep;
+    document.body.classList.add("yt-mini");
+    this.run(() => to, reduceMotion.matches ? 0 : 280, cssEase("--ease-out"), () => { this.win.style.cssText = ""; });
+  },
+};
+$("#ytClose").onclick = () => { Yt.hide(); Player.ui({ playing: false }); updatePill(); renderSheetState(); };
+$("#ytOpen").onclick = () => NP.open();
+$("#ytWin .yt-bar").addEventListener("click", e => { if (!e.target.closest("button")) NP.open(); });
+// A sheet opening over the full-screen player sends the video to its corner, so nothing covers it.
+{
+  const watch = new MutationObserver(() => Yt.place());
+  $$(".sheet").forEach(s => watch.observe(s, { attributes: true, attributeFilter: ["class"] }));
+}
+addEventListener("resize", () => { if (Yt.shown && !Yt.win.classList.contains("docked")) Yt.float(); });
+new ResizeObserver(() => Yt.clearBar()).observe($("#player"));
+
 /* ======================================================== player */
 
 const audio = $("#audio");
 const shuffled = list => { const q = list.slice(); for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; } return q; };
 
 const Player = {
-  mode: null,          // 'browser' (local files, demo previews) | 'spotify'
+  mode: null,          // 'browser' (local files, demo previews) | 'youtube' (YouTube's player) | 'spotify'
   album: null,
   order: [],           // the album's tracks, in album order
   queue: [], index: 0, // the same tracks in the order they play (shuffled or not)
@@ -1066,12 +1247,14 @@ const Player = {
   pollT: null, tickT: null,
   cur: {},             // what is showing: title, artist, art, playing, device, pos, dur
 
-  albumId() { return this.mode === "browser" ? this.album?.id : this.sp?.album_id; },
-  playing() { return this.mode === "browser" ? !audio.paused : !!this.sp?.is_playing; },
-  isTrack(id) { return this.mode === "browser" && this.queue[this.index]?.id === id; },
+  queued() { return this.mode === "browser" || this.mode === "youtube"; },   // this screen plays its own queue
+  albumId() { return this.queued() ? this.album?.id : this.sp?.album_id; },
+  playing() { return this.mode === "browser" ? !audio.paused : this.mode === "youtube" ? Yt.playing() : !!this.sp?.is_playing; },
+  isTrack(id) { return this.queued() && this.queue[this.index]?.id === id; },
   shuffleOn() { return this.mode === "spotify" ? !!this.sp?.shuffle : this.shuffle; },
   repeatMode() { return this.mode === "spotify" ? ({ context: "all", track: "one" }[this.sp?.repeat] || "off") : this.repeat; },
-  canSeek() { return this.mode === "browser" ? audio.duration > 0 : this.mode === "spotify" && this.cur.dur > 0; },
+  canSeek() { return this.mode === "browser" ? audio.duration > 0 : !!this.mode && this.cur.dur > 0; },
+  position() { return this.mode === "youtube" ? Yt.time() : audio.currentTime; },
 
   /* `index` is the track to start on. Leave it out to play the album from the top, or from a
      random track when shuffle is on. */
@@ -1079,24 +1262,38 @@ const Player = {
     // a Spotify playlist whose tracks Spotify won't list still plays
     if (!album.track_list?.length && album.source !== "spotify") { toast("This album has no playable tracks"); return; }
     if (album.source === "spotify") return this.playSpotify(album, index ?? 0, shuffle);
+    const yt = album.source === "youtube";
+    // YouTube: the videos whose owners let them play outside YouTube
+    const playable = yt ? album.track_list.filter(t => t.embeddable !== false) : album.track_list;
+    if (!playable.length) { toast("These play only on YouTube. Open them in YouTube Music.", 5000); return; }
     if (this.mode === "spotify" && this.sp?.is_playing) api("/api/spotify/control", { method: "POST", body: { action: "pause" } }).catch(() => {});
     this.stopPolling();
+    if (yt) audio.pause(); else if (this.mode === "youtube") Yt.hide();
     if (shuffle && !this.shuffle) { this.shuffle = true; store.set("shuffle", true); }
-    this.mode = "browser"; this.album = album;
-    this.order = album.track_list.slice();
+    const want = index !== null ? album.track_list[index] : null;
+    this.mode = yt ? "youtube" : "browser"; this.album = album;
+    this.order = playable.slice();
+    const at = want && this.order.includes(want) ? this.order.indexOf(want) : null;
     if (this.shuffle) {
-      const first = (index !== null && this.order[index]) || this.order[Math.floor(Math.random() * this.order.length)];
+      const first = (at !== null && this.order[at]) || this.order[Math.floor(Math.random() * this.order.length)];
       this.queue = [first, ...shuffled(this.order.filter(t => t !== first))];
       this.index = 0;
     } else {
       this.queue = this.order.slice();
-      this.index = clamp(index ?? 0, 0, this.queue.length - 1);
+      this.index = clamp(at ?? 0, 0, this.queue.length - 1);
     }
     this.load(true);
   },
 
   load(autoplay) {
     const t = this.queue[this.index]; if (!t) return;
+    if (this.mode === "youtube") {
+      this.ui({ title: t.title, artist: t.artist || this.album.artist, art: this.album.art, playing: true, pos: 0, dur: t.duration });
+      Yt.play(t).catch(err => toast(err.message, 5000));   // after the bar is up, so it floats clear of it
+      Speakers.paint();
+      setGlow(); updatePill(); renderSheetState(); NP.modes(); NP.queue();
+      return;
+    }
     audio.loop = this.repeat === "one";
     const start = () => { if (autoplay) audio.play().catch(err => { if (err.name !== "AbortError") toast("Tap play to start (" + err.message + ")"); }); };
     if (this.album.source === "device") {   // read from this computer's disk as it plays
@@ -1122,6 +1319,7 @@ const Player = {
   async playSpotify(album, index, shuffle) {
     Sdk.wake();   // in the tap itself, so the browser lets this page make sound
     if (this.mode === "browser") audio.pause();
+    if (this.mode === "youtube") Yt.hide();
     this.mode = "spotify"; this.album = album;
     let offset = index;
     if (shuffle) offset = Math.floor(Math.random() * Math.max(1, album.track_list.length || album.tracks || 1));
@@ -1151,6 +1349,11 @@ const Player = {
 
   toggle() {
     if (this.mode === "browser") { audio.paused ? audio.play() : audio.pause(); }
+    else if (this.mode === "youtube") {
+      const was = Yt.playing();
+      if (was) Yt.pause(); else Yt.resume();   // in the tap itself, so the browser lets it make sound
+      this.ui({ playing: !was }); updatePill();
+    }
     else if (this.mode === "spotify") {
       const action = this.sp?.is_playing ? "pause" : "resume";
       if (this.sp) {   // hold the position where it is while paused
@@ -1163,6 +1366,7 @@ const Player = {
   },
   stop() {
     if (this.mode === "browser") { audio.pause(); }
+    else if (this.mode === "youtube") { Yt.hide(); }
     else if (this.mode === "spotify" && this.sp?.is_playing) { this.sp.is_playing = false; api("/api/spotify/control", { method: "POST", body: { action: "pause" } }).catch(() => {}); }
     this.stopPolling();
     this.mode = null; this.album = null; this.sp = null;
@@ -1171,23 +1375,30 @@ const Player = {
     setGlow(); render();
   },
   next() {
-    if (this.mode === "browser") {
+    if (this.queued()) {
       if (this.index < this.queue.length - 1) this.index++;
       else if (this.repeat === "all") this.index = 0;
       else return;
       this.load(true);
     } else if (this.mode === "spotify") this.spotify("next");
   },
+  /* the track came to its end: the next one, the same again, or stop at the end of the album */
+  ended() {
+    if (this.mode === "youtube" && this.repeat === "one") { Yt.seek(0); Yt.resume(); return; }
+    if (this.index < this.queue.length - 1 || this.repeat === "all") this.next();
+    else { this.ui({ playing: false }); updatePill(); renderSheetState(); }
+  },
   prev() {
-    if (this.mode === "browser") {
-      if (audio.currentTime > 4 || (this.index === 0 && this.repeat !== "all")) audio.currentTime = 0;
+    if (this.queued()) {
+      if (this.position() > 4 || (this.index === 0 && this.repeat !== "all")) { if (this.mode === "youtube") Yt.seek(0); else audio.currentTime = 0; }
       else { this.index = (this.index || this.queue.length) - 1; this.load(true); }
     } else if (this.mode === "spotify") this.spotify("previous");
   },
-  jumpTo(i) { if (this.mode === "browser" && this.queue[i]) { this.index = i; this.load(true); } },
+  jumpTo(i) { if (this.queued() && this.queue[i]) { this.index = i; this.load(true); } },
   /* f: how far into the track, 0 to 1 */
   seek(f) {
     if (this.mode === "browser" && audio.duration) { audio.currentTime = f * audio.duration; mediaState(); }
+    else if (this.mode === "youtube" && this.cur.dur) { const pos = f * this.cur.dur; Yt.seek(pos); this.ui({ pos }); }
     else if (this.mode === "spotify" && this.cur.dur) {
       const pos = f * this.cur.dur;
       if (this.sp) { this.sp.progress_ms = pos * 1000; this.spAt = performance.now(); }
@@ -1203,7 +1414,7 @@ const Player = {
       return this.spotify("shuffle", on);
     }
     this.shuffle = !this.shuffle; store.set("shuffle", this.shuffle);
-    if (this.mode === "browser") {   // the track playing carries on; what comes after it changes
+    if (this.queued()) {   // the track playing carries on; what comes after it changes
       const cur = this.queue[this.index];
       this.queue = this.shuffle ? [cur, ...shuffled(this.order.filter(t => t !== cur))] : this.order.slice();
       this.index = Math.max(0, this.queue.indexOf(cur));
@@ -1279,9 +1490,7 @@ const Player = {
 };
 
 audio.addEventListener("ended", () => {   // "repeat this track" loops the audio itself and never ends
-  if (Player.mode !== "browser") return;
-  if (Player.index < Player.queue.length - 1 || Player.repeat === "all") Player.next();
-  else { Player.ui({ playing: false }); updatePill(); renderSheetState(); }
+  if (Player.mode === "browser") Player.ended();
 });
 /* Lock screen and notification: the playing state and a position bar you can drag there. */
 function mediaState() {
@@ -1334,6 +1543,7 @@ const NP = {
     this.isOpen = true;
     this.render();
     reveal(np, true);
+    Yt.place();   // YouTube's video rides up with it, onto the stage
     for (const s of ["#topbar", "#room", "#player"]) $(s).inert = true;   // nothing behind it takes focus
     clearTimeout(this.outT);
     this.outT = setTimeout(() => { np.classList.add("out"); this.spin(); }, reduceMotion.matches ? 0 : 220);
@@ -1347,6 +1557,7 @@ const NP = {
     np.classList.remove("dragging");
     np.style.transform = "";
     reveal(np, false, 300);
+    Yt.place();   // and back to its corner
     for (const s of ["#topbar", "#room", "#player"]) $(s).inert = false;
     this.outT = setTimeout(() => { np.classList.remove("out"); this.spin(true); }, 300);
     if (!fromHistory && history.state?.np) { this.skipPop = true; history.back(); }
@@ -1399,7 +1610,7 @@ const NP = {
     if (!this.isOpen) return;
     const q = Player.queue, i = Player.index;
     let items = [];
-    if (Player.mode === "browser") {
+    if (Player.queued()) {
       items = q.slice(i + 1).map((t, k) => [t, i + 1 + k]);
       if (Player.repeat === "all") items = items.concat(q.slice(0, i).map((t, k) => [t, k]));
     }
@@ -1491,7 +1702,8 @@ addEventListener("popstate", () => {
 /* the bar at the bottom: tap it, or swipe it up, for the full player */
 $("#player").addEventListener("click", e => {
   peek();
-  if (!e.target.closest("button, .p-progress")) NP.open();
+  // the path as it was when the tap landed: the play button redraws its icon while handling it
+  if (!e.composedPath().some(el => el.matches?.("button, .p-progress"))) NP.open();
 });
 let barY = null;
 $("#player").addEventListener("touchstart", e => { barY = e.touches.length === 1 && !e.target.closest(".p-progress") ? e.touches[0].clientY : null; }, { passive: true });
@@ -1583,6 +1795,7 @@ const Speakers = {
       if (!s.device) return { name: "Spotify", icon: "speaker", remote: false };   // until Spotify says
       return { name: s.device, icon: iconFor(s.device_type), remote: true };
     }
+    if (Player.mode === "youtube") return { name: HERE.name, icon: HERE.icon, remote: false };   // in YouTube's player, here
     return { name: this.sink?.label || HERE.name, icon: this.sink ? "speaker" : HERE.icon, remote: false };
   },
   paint() {
@@ -1615,8 +1828,14 @@ const Speakers = {
   },
   /* Your own music plays in this page, through whatever this device plays sound through. */
   renderHere() {
-    $("#deviceList").innerHTML = this.row({ icon: this.sink ? "speaker" : HERE.icon, name: this.sink?.label || HERE.name, sub: "Playing here", on: true });
+    const yt = Player.mode === "youtube";
+    $("#deviceList").innerHTML = this.row({ icon: this.sink && !yt ? "speaker" : HERE.icon, name: (!yt && this.sink?.label) || HERE.name, sub: yt ? "Playing in YouTube's player, here" : "Playing here", on: true });
     $("#deviceList button").onclick = () => this.close();
+    $("#devPick").hidden = $("#devPick").hidden || yt;
+    if (yt) {
+      $("#devHint").textContent = "YouTube plays in its own player on this screen. To play it on another device, open it in YouTube Music there.";
+      return;
+    }
     $("#devHint").textContent = (HERE.type === "Computer"
       ? "Your music plays through this computer's sound output, which you change in its sound settings."
       : `Your music plays on ${HERE.name.toLowerCase()}. To hear it on Bluetooth headphones or a speaker, connect them to it.`)
@@ -1710,15 +1929,18 @@ function renderAccount() {
 }
 
 function renderEmpty() {
-  const admin = S.me?.admin, sp = S.status?.spotify;
+  const admin = S.me?.admin, sp = S.status?.spotify, yt = S.status?.youtube;
+  const services = [sp?.configured && "Spotify", yt?.configured && "YouTube"].filter(Boolean).join(" or ") || "Spotify";
   $("#emptyText").textContent = admin
-    ? "Load the demo shelf, connect Spotify, or add music to the server's music folder."
-    : "Connect Spotify to see your albums and playlists here" + (sp && !sp.configured ? " (once the owner sets Spotify up)." : ".");
+    ? `Load the demo shelf, connect ${services}, or add music to the server's music folder.`
+    : `Connect ${services} to see your albums and playlists here` + (sp && !sp.configured && !yt?.configured ? " (once the owner sets Spotify up)." : ".");
   $("#demoLoadBtn").hidden = !admin;
   $("#emptySpotify").hidden = !sp?.configured || sp.connected;
+  $("#emptyYouTube").hidden = !yt?.configured || yt.connected;
   $("#emptyFolder").hidden = S.vertical;   // on a phone, the Android app plays the phone's own music
 }
 $("#emptySpotify").onclick = () => (location.href = "/auth/spotify/login");
+$("#emptyYouTube").onclick = () => (location.href = "/auth/youtube/login");
 $("#emptyFolder").onclick = () => Device.choose();
 
 /* ======================================================== music on this computer
@@ -1877,6 +2099,7 @@ function renderStatus(st) {
     $("#spSync").onclick = () => api("/api/spotify/sync", { method: "POST" }).then(watchStatus);
     $("#spOff").onclick = async () => { if (confirm("Disconnect Spotify and take its albums and playlists off your shelf?")) { await api("/api/spotify/disconnect", { method: "POST" }); loadAlbums(); refreshStatus(); } };
   }
+  renderYouTube(st.youtube || {});
   // The server's music folder and the demo shelf are looked after by whoever runs the server.
   $("#libSec").hidden = !st.admin; $("#demoSec").hidden = !st.admin;
   if (st.admin) $("#libStatus").textContent = lib.error ? lib.error :
@@ -1900,12 +2123,68 @@ function renderStatus(st) {
     $("#demoLoad2").onclick = loadDemo;
   }
 
-  const busy = lib.scanning || sp.syncing || demo.loading;
+  const yt = st.youtube || {};
+  const busy = lib.scanning || sp.syncing || demo.loading || yt.syncing;
   const t = $("#scanToast");
   reveal(t, busy);
   if (busy) t.textContent = demo.loading ? `Demo shelf: ${demo.albums} of ${demo.total} albums` :
-    lib.scanning ? `Library: ${lib.phase}${lib.art_total ? ` ${lib.art_done}/${lib.art_total}` : ""}` : `Spotify: syncing ${sp.albums} albums`;
+    lib.scanning ? `Library: ${lib.phase}${lib.art_total ? ` ${lib.art_done}/${lib.art_total}` : ""}` :
+    sp.syncing ? `Spotify: syncing ${sp.albums} albums` : `YouTube: bringing in ${yt.albums} playlists`;
 }
+
+/* YouTube in Settings: connect it, and add albums, playlists and songs by search or link. */
+function renderYouTube(yt) {
+  $("#ytSec").hidden = !yt.configured;
+  if (!yt.configured) return;
+  const btns = $("#ytButtons"); btns.innerHTML = "";
+  $("#ytAdd").hidden = !yt.connected;
+  $("#ytWarn").hidden = !!yt.connected;
+  $("#ytHost").textContent = location.host;
+  if (!yt.connected) {
+    $("#ytStatus").textContent = "Not connected. Your YouTube playlists, including the ones you made in YouTube Music, and your liked music come onto your shelf.";
+    btns.innerHTML = `<button class="primary" id="ytOn">Connect YouTube</button>`;
+    $("#ytOn").onclick = () => (location.href = "/auth/youtube/login");
+    return;
+  }
+  const mine = S.albums.filter(a => a.source === "youtube").length;
+  $("#ytStatus").textContent = yt.syncing ? `Bringing in your playlists… ${yt.albums}` :
+    `Connected${yt.channel ? ` as ${yt.channel}` : ""} · ${mine} on your shelf` + (yt.error ? ` · last sync: ${yt.error}` : "");
+  btns.innerHTML = `<button class="ghost" id="ytSync">Sync again</button><button class="ghost" id="ytOff">Disconnect</button>`;
+  $("#ytSync").onclick = () => api("/api/youtube/sync", { method: "POST" }).then(watchStatus);
+  $("#ytOff").onclick = async () => {
+    if (!confirm("Disconnect YouTube? Album Viewer gives back its access to your YouTube and takes everything from YouTube off your shelf.")) return;
+    if (Player.mode === "youtube") Player.stop();
+    await api("/api/youtube/disconnect", { method: "POST" });
+    loadAlbums(); refreshStatus();
+  };
+}
+
+const ytLink = q => /youtu\.?be|youtube\.com|[?&](list|v)=/i.test(q) || /^[\w-]{11}$/.test(q);
+let ytFound = [];
+$("#ytForm").onsubmit = async e => {
+  e.preventDefault();
+  const q = $("#ytQuery").value.trim(), out = $("#ytResults");
+  if (!q) return;
+  if (ytLink(q)) {   // a link: straight onto the shelf
+    try { const a = await api("/api/youtube/add", { method: "POST", body: { link: q } }); $("#ytQuery").value = ""; out.innerHTML = ""; toast(`Added ${a.title}`); loadAlbums(); }
+    catch (err) { toast(err.message, 5000); }
+    return;
+  }
+  out.innerHTML = '<li class="hint">Looking on YouTube…</li>';
+  try { ytFound = await api(`/api/youtube/search?q=${encodeURIComponent(q)}`); }
+  catch (err) { out.innerHTML = ""; return toast(err.message, 5000); }
+  const kinds = { album: "Album", playlist: "Playlist", song: "Song" };
+  out.innerHTML = ytFound.length ? ytFound.map((r, i) =>
+    `<li><img alt="" src="${esc(r.art || "")}"${r.art ? "" : " hidden"}><span class="nm"><b>${esc(r.title)}</b><small>${kinds[r.kind]} · ${esc(r.artist)}</small></span>` +
+    `<button class="ghost" type="button" data-i="${i}">Add</button></li>`).join("") : '<li class="hint">Nothing found. Try the artist and album name, or paste a link.</li>';
+};
+$("#ytResults").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-i]"); if (!b) return;
+  const r = ytFound[+b.dataset.i];
+  b.disabled = true;
+  try { await api("/api/youtube/add", { method: "POST", body: { id: r.id, kind: r.kind } }); b.textContent = "Added"; loadAlbums(); }
+  catch (err) { b.disabled = false; toast(err.message, 5000); }
+});
 
 async function refreshStatus() {
   try { S.status = await api("/api/status"); renderStatus(S.status); renderEmpty(); return S.status; } catch { return null; }
@@ -1917,7 +2196,7 @@ function watchStatus() {
   let wasBusy = true, ticks = 0;
   watchT = setInterval(async () => {
     const st = await refreshStatus(); if (!st) return;
-    const busy = st.library?.scanning || st.spotify.syncing || st.demo.loading;
+    const busy = st.library?.scanning || st.spotify.syncing || st.demo.loading || st.youtube?.syncing;
     if (++ticks % 3 === 0 && busy) loadAlbums();   // show progress on the shelf while loading
     if (!busy && wasBusy) { clearInterval(watchT); watchT = null; loadAlbums(); }
     wasBusy = busy;
@@ -2012,6 +2291,8 @@ new ResizeObserver(() => {
   const params = new URLSearchParams(location.search);
   if (params.get("spotify") === "connected") toast("Spotify connected — syncing your albums");
   if (params.get("spotify_error")) toast("Spotify: " + params.get("spotify_error"), 6000);
+  if (params.get("youtube") === "connected") toast("YouTube connected — bringing in your playlists");
+  if (params.get("youtube_error")) toast("YouTube: " + params.get("youtube_error"), 6000);
   if (params.toString()) history.replaceState(null, "", "/");
 
   const me = api("/api/me").then(me => { S.me = me; renderAccount(); renderEmpty(); }).catch(() => {});
@@ -2019,7 +2300,7 @@ new ResizeObserver(() => {
   await loadAlbums();
   Promise.all([me, order]).then(() => Device.restore()).catch(() => {});   // this computer's music, if a folder was chosen
   const st = await refreshStatus();
-  if (st && (st.library?.scanning || st.spotify.syncing || st.demo.loading || params.get("spotify"))) watchStatus();
+  if (st && (st.library?.scanning || st.spotify.syncing || st.demo.loading || st.youtube?.syncing || params.get("spotify") || params.get("youtube"))) watchStatus();
   if (st?.spotify.connected) {
     if (Sdk.enabled()) Sdk.load();
     try {   // pick up whatever is already playing on Spotify

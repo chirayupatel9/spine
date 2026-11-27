@@ -26,6 +26,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import dev.chirayupatel.music.App
 import dev.chirayupatel.music.device.PhoneMusic
 import dev.chirayupatel.music.device.Speakers
+import dev.chirayupatel.music.device.YouTubeMusic
 import dev.chirayupatel.music.net.Album
 import dev.chirayupatel.music.net.AlbumDetail
 import dev.chirayupatel.music.net.Me
@@ -153,10 +154,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val hasDemo by derivedStateOf { albums.any { it.source == "demo" } }
     val hasPlaylists by derivedStateOf { albums.any { it.kind == "playlist" } }
+    val hasYouTube by derivedStateOf { albums.any { it.source == "youtube" } }
 
     val visible: List<Album> by derivedStateOf {
         val q = query.trim().lowercase()
-        val src = if ((source == "demo" && !hasDemo) || (source == "playlist" && !hasPlaylists)) "all" else source
+        val src = if ((source == "demo" && !hasDemo) || (source == "playlist" && !hasPlaylists) || (source == "youtube" && !hasYouTube)) "all" else source
         fun inSource(a: Album) = when (src) {
             "all" -> true
             "playlist" -> a.kind == "playlist"
@@ -255,6 +257,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun completeSignIn(uri: Uri) {
         uri.getQueryParameter("error")?.let { if (signedIn == true) message = it else authError = it; return }
         if (uri.getQueryParameter("connected") == "spotify") { message = "Spotify connected — bringing in your albums and playlists"; followSync(); return }
+        if (uri.getQueryParameter("connected") == "youtube") { message = "YouTube connected — bringing in your playlists"; followSync(); return }
         val code = uri.getQueryParameter("code") ?: return
         val verifier = prefs.getString("auth_verifier", null) ?: run { authError = "Start the sign-in again"; return }
         val base = prefs.getString("auth_server", null) ?: api.server
@@ -276,14 +279,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         try { open(Uri.parse(api.spotifyConnectLink())) } catch (e: IOException) { handle(e) }
     }
 
-    /** Refresh the shelf while Spotify's albums and playlists come in. */
+    /** Connect YouTube to this account, the same way. */
+    fun connectYouTube(open: (Uri) -> Unit) = viewModelScope.launch {
+        try { open(Uri.parse(api.youtubeConnectLink())) } catch (e: IOException) { handle(e) }
+    }
+
+    fun disconnectYouTube() = viewModelScope.launch {
+        try { api.youtubeDisconnect(); details.keys.removeAll { it.startsWith("y") }; refresh() } catch (e: IOException) { handle(e) }
+    }
+
+    /** Refresh the shelf while Spotify's or YouTube's albums and playlists come in. */
     private fun followSync() = viewModelScope.launch {
         repeat(40) {
             delay(1500)
             val st = runCatching { api.status() }.getOrNull() ?: return@repeat
             status = st
-            if (it % 2 == 1 || !st.spotify.syncing) refresh()
-            if (!st.spotify.syncing && it > 0) return@launch
+            val busy = st.spotify.syncing || st.youtube.syncing
+            if (it % 2 == 1 || !busy) refresh()
+            if (!busy && it > 0) return@launch
         }
     }
 
@@ -456,6 +469,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun play(albumId: String, index: Int? = null, shuffle: Boolean = false) = viewModelScope.launch {
         try {
             val a = detail(albumId)
+            if (a.source == "youtube") {   // plays in the YouTube Music app, as their own account (see YouTubeMusic)
+                val tracks = a.trackList
+                val t = when {
+                    index != null -> tracks.getOrNull(index)
+                    shuffle && tracks.isNotEmpty() -> tracks.random()
+                    else -> tracks.firstOrNull()
+                }
+                val url = YouTubeMusic.url(a.openUrl, t?.uri) ?: run { message = "This can't open in YouTube Music"; return@launch }
+                controller?.pause()   // one thing at a time
+                if (spotifyMode && isPlaying) { isPlaying = false; runCatching { api.spotifyControl("pause") } }
+                if (!YouTubeMusic.open(getApplication(), url)) message = "Install YouTube Music to play this"
+                return@launch
+            }
             if (a.source == "spotify") {   // a playlist Spotify won't list the tracks of still plays
                 var target = spotifyTarget()
                 if (target?.id == null && Speakers.spotifyInstalled(getApplication())) {

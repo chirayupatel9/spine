@@ -487,6 +487,41 @@ body.wallmode #screen { flex: none; border-radius: 0; box-shadow: none; }
   .np-next { margin-top: 18px; }
 }
 
+/* ------------------------------------------------ YouTube's player (app.js: Yt)
+   YouTube's rules: on screen while it plays, at least 200×200 px, nothing over it. With the
+   full-screen player up it covers the stage (placed there by app.js, frame by frame, so it rises
+   and falls with it); otherwise it floats above the bar, over everything but toasts. */
+#ytWin {
+  position: fixed; z-index: 35; right: 16px; bottom: var(--yt-bottom, 96px); width: min(356px, calc(100vw - 24px));
+  display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; background: #000;
+  box-shadow: 0 18px 50px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08);
+}
+#ytFrame { flex: none; height: 200px; background: #000; }
+#ytFrame iframe { display: block; width: 100%; height: 100%; border: 0; }
+.yt-bar { display: flex; align-items: center; gap: 2px; height: 38px; padding: 0 2px 0 12px; background: #151311; cursor: pointer; flex: none; }
+.yt-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.yt-bar .icon { width: 36px; height: 36px; color: var(--muted); }
+.yt-bar .icon svg { width: 18px; height: 18px; }
+#ytWin.docked { min-width: 200px; min-height: 200px; border-radius: 10px; box-shadow: 0 30px 60px -14px rgba(0,0,0,.7); }
+#ytWin.docked .yt-bar { display: none; }
+#ytWin.docked #ytFrame { height: 100%; }
+/* the stage holds the video instead of the cover and its record */
+.np.yt .np-stage { width: min(calc(100vw - 40px), 640px); height: auto; aspect-ratio: 16 / 9; min-height: 200px; }
+.np.yt .np-stage > * { visibility: hidden; }
+@media (min-width: 640px) and (min-aspect-ratio: 5/4) {
+  .np.yt .np-stage { width: max(356px, calc(var(--cs) * 1.25)); }
+}
+@media (max-width: 860px) { body.yt-mini #scanToast { bottom: 262px; } }   /* clear of the floating video */
+#aTracks li.off { color: var(--muted); }
+#aTracks .only { font-size: 11px; letter-spacing: .04em; color: var(--faint); margin-left: 6px; white-space: nowrap; }
+.yt-results { list-style: none; margin: 8px 0 0; padding: 0; }
+.yt-results li { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.yt-results img { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; flex: none; background: #222; }
+.yt-results .nm { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.yt-results .nm b { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yt-results .nm small { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yt-results li.hint { border: 0; }
+
 /* ------------------------------------------------ hover only where there is a real pointer,
    so a tap on a tablet doesn't leave things lit */
 @media (hover: hover) and (pointer: fine) {

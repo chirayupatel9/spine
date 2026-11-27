@@ -212,12 +212,14 @@ fun IconButton(icon: ImageVector, label: String, tint: Color = Palette.Muted, si
 @Composable
 private fun SourceSwitch(vm: AppViewModel, modifier: Modifier) {
     val options = buildList {
-        add("all" to "All"); add("spotify" to "Spotify"); if (vm.hasPlaylists) add("playlist" to "Playlists")
+        add("all" to "All"); add("spotify" to "Spotify"); if (vm.hasYouTube) add("youtube" to "YouTube")
+        if (vm.hasPlaylists) add("playlist" to "Playlists")
         add("local" to "Local"); if (vm.hasDemo) add("demo" to "Demo")
     }
     Row(modifier.clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = .05f)).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for ((key, label) in options) {
-            val on = vm.source == key || (key == "all" && ((vm.source == "demo" && !vm.hasDemo) || (vm.source == "playlist" && !vm.hasPlaylists)))
+            val on = vm.source == key || (key == "all" && ((vm.source == "demo" && !vm.hasDemo) || (vm.source == "playlist" && !vm.hasPlaylists) ||
+                (vm.source == "youtube" && !vm.hasYouTube)))
             Box(
                 Modifier.weight(1f).height(40.dp).pressable(label) { vm.chooseSource(key) }.clip(RoundedCornerShape(9.dp))
                     .background(if (on) Color.White.copy(alpha = .1f) else Color.Transparent),
@@ -617,14 +619,17 @@ private fun EmptyShelf(vm: AppViewModel) {
         if (ok) vm.enablePhoneMusic() else vm.message = "Album Viewer needs to see your music to show it"
     }
     val sp = vm.me?.spotify ?: vm.status?.spotify
+    val yt = vm.status?.youtube ?: vm.me?.youtube
     Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         Text("Your collection, back on the wall.", color = Palette.Ink, fontFamily = FontFamily.Serif, fontSize = 26.sp, textAlign = TextAlign.Center)
         Text(
-            "Connect Spotify for your albums and playlists, or show the music on this phone.",
+            if (yt?.configured == true) "Connect Spotify or YouTube for your albums and playlists, or show the music on this phone."
+            else "Connect Spotify for your albums and playlists, or show the music on this phone.",
             color = Palette.Muted, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
         )
         Column(verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             if (sp?.configured == true && !sp.connected) PrimaryButton("Connect Spotify") { vm.connectSpotify { openInBrowser(context, it) } }
+            if (yt?.configured == true && !yt.connected) PrimaryButton("Connect YouTube") { vm.connectYouTube { openInBrowser(context, it) } }
             if (!vm.phoneMusicOn) GhostButton("Show music on this phone") {
                 if (vm.phoneAllowed) vm.enablePhoneMusic() else askForMusic.launch(PhoneMusic.PERMISSION)
             }
